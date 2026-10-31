@@ -1,0 +1,39 @@
+# --- secrets ---
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# --- python ---
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.db
+*.db-wal
+*.db-shm
+var/
+backend/var/
+
+# --- node ---
+node_modules/
+.next/
+out/
+npm-debug.log*
+
+# --- flutter/dart ---
+.dart_tool/
+.packages
+build/
+*.iml
+app/android/.gradle/
+app/ios/Pods/
+
+# --- editors / os ---
+.DS_Store
+.idea/
+.vscode/
+web/tsconfig.tsbuildinfo
+*.tsbuildinfo
+*.tsbuildinfo

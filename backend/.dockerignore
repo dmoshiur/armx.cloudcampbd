@@ -1,0 +1,9 @@
+.venv
+__pycache__
+*.pyc
+armx.db
+var
+tests
+.pytest_cache
+.ruff_cache
+.env

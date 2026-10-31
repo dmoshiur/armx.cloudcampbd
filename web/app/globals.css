@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Semantic surface variables. Dark is the default; light swaps ink/navy for fog/white
+   and keeps the accents fixed, exactly as the design tokens specify. */
+:root,
+html.dark {
+  --bg: 11 18 32;          /* ink   #0B1220 */
+  --surface: 16 25 53;     /* navy  #101935 */
+  --border: 30 42 71;
+  --text: 244 246 251;     /* fog   #F4F6FB */
+  --text-muted: 154 164 184;
+  color-scheme: dark;
+}
+
+html.light {
+  --bg: 244 246 251;       /* fog   */
+  --surface: 255 255 255;  /* white */
+  --border: 215 220 234;   /* line  */
+  --text: 11 18 32;        /* ink   */
+  --text-muted: 91 100 117;/* muted */
+  color-scheme: light;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-bg text-fg antialiased;
+  /* No webfont CDN: Inter when present on the device, system grotesk otherwise. */
+  font-family: Inter, "Inter var", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+/* One visible focus treatment everywhere. */
+:focus-visible {
+  outline: 2px solid theme("colors.accent");
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+::selection {
+  background: theme("colors.accent");
+  color: theme("colors.ink");
+}
+
+/* Purposeful motion only. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Thin, unobtrusive scrollbars that work in both themes. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--border)) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgb(var(--border));
+  border-radius: 999px;
+}
+
+@keyframes armx-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-fade-up {
+  animation: armx-fade-up 180ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}

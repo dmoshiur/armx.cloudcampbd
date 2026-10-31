@@ -1,0 +1,7 @@
+Migrations live here. Create one with:
+
+    alembic revision --autogenerate -m "add table"
+
+Apply with:
+
+    alembic upgrade head
