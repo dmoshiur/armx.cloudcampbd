@@ -1,0 +1,70 @@
+# Minimal Home Assistant setup for the A.R.M.X smart-home demo.
+#
+# 1. Copy this into your HA configuration.yaml (or merge the blocks).
+# 2. Create a long-lived access token: Profile -> Security -> Long-lived tokens.
+# 3. On the server set:
+#      HOME_ASSISTANT_URL=http://homeassistant.local:8123
+#      HOME_ASSISTANT_TOKEN=<token>
+#      HOME_ASSISTANT_ALLOWED_ENTITIES=light.living_room,light.desk,switch.fan
+#
+# The allowlist above is the security boundary: the assistant cannot read or write
+# any entity that is not listed, even if the model asks for it.
+
+default_config:
+
+http:
+  # Only reachable from your LAN/VPN; publish it through a TLS reverse proxy if remote.
+  server_host: 0.0.0.0
+  use_x_forwarded_for: true
+  trusted_proxies:
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+
+logger:
+  default: warning
+
+mqtt:
+  broker: mqtt.local          # set MQTT_HOST on the server too
+  port: 8883
+  certificate: auto           # use TLS; never expose 1883 to the internet
+  username: armx
+  password: !secret mqtt_password
+
+light:
+  - platform: mqtt
+    name: "Living room"
+    unique_id: living_room_light
+    state_topic: "armx/esp32/living-room/state"
+    command_topic: "armx/esp32/living-room/set"
+    brightness_state_topic: "armx/esp32/living-room/brightness"
+    brightness_command_topic: "armx/esp32/living-room/brightness/set"
+    payload_on: "ON"
+    payload_off: "OFF"
+    brightness_scale: 100
+    optimistic: false
+
+  - platform: mqtt
+    name: "Desk"
+    unique_id: desk_light
+    state_topic: "armx/esp32/desk/state"
+    command_topic: "armx/esp32/desk/set"
+    payload_on: "ON"
+    payload_off: "OFF"
+
+switch:
+  - platform: mqtt
+    name: "Fan"
+    unique_id: fan_switch
+    state_topic: "armx/esp32/fan/state"
+    command_topic: "armx/esp32/fan/set"
+    payload_on: "ON"
+    payload_off: "OFF"
+
+sensor:
+  - platform: mqtt
+    name: "Living room temperature"
+    unique_id: living_room_temperature
+    state_topic: "armx/esp32/living-room/temperature"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
