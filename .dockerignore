@@ -23,7 +23,6 @@ deploy/tests
 # bare `app` pattern because that can also hide the FastAPI `backend/app` tree.
 app/**
 docs/**
-design/**
 examples/**
 README.md
 Makefile

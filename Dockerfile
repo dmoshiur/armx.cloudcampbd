@@ -9,6 +9,8 @@ COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
 FROM web-deps AS web-builder
+# Tailwind imports the repository's shared design tokens from ../design.
+COPY design/tokens.json /design/tokens.json
 COPY web/ ./
 ENV NEXT_TELEMETRY_DISABLED=1 \
     BUILD_STANDALONE=1
@@ -39,6 +41,8 @@ COPY --from=web-builder --chown=armx:armx /app/.next/standalone ./web/
 COPY --from=web-builder --chown=armx:armx /app/.next/static ./web/.next/static/
 COPY --from=web-builder --chown=armx:armx /app/public ./web/public/
 COPY --chown=armx:armx backend/ ./backend/
+# Backend project linting also reads the repository's shared token source.
+COPY --chown=armx:armx design/tokens.json ./design/tokens.json
 COPY deploy/runtime/ ./deploy/runtime/
 RUN chmod 0755 /app/deploy/runtime/entrypoint.sh \
     && mkdir -p /data/workspace /data/media \
