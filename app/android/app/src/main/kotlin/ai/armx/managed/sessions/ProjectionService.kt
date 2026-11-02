@@ -88,9 +88,13 @@ class ProjectionService : Service() {
 
         startForeground(NOTIFICATION_ID, notification(sessionId))
         val manager = getSystemService(MediaProjectionManager::class.java)
-        projection = manager.getMediaProjection(resultCode, data).also {
-            it.registerCallback(projectionCallback, Handler(mainLooper))
+        val activeProjection = manager.getMediaProjection(resultCode, data)
+        if (activeProjection == null) {
+            stopSelf()
+            return START_NOT_STICKY
         }
+        activeProjection.registerCallback(projectionCallback, Handler(mainLooper))
+        projection = activeProjection
         beginCapture()
         return START_NOT_STICKY
     }
@@ -263,7 +267,7 @@ class ProjectionService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_armx)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("A.R.M.X screen sharing is active")
             .setContentText("Visible session ${sessionId.take(8)} • tap Stop sharing at any time")
             .setContentIntent(openPending)
@@ -293,7 +297,7 @@ class ProjectionService : Service() {
         const val EXTRA_API_BASE = "projection_api_base"
         const val EXTRA_DEVICE_ID = "projection_device_id"
         const val EXTRA_DEVICE_CREDENTIAL = "projection_device_auth"
-        private const val ACTION_STOP = "ai.armx.managed.STOP_PROJECTION"
+        const val ACTION_STOP = "ai.armx.managed.STOP_PROJECTION"
         private const val CHANNEL_ID = "armx_visible_screen_share"
         private const val NOTIFICATION_ID = 7301
         private const val FRAME_INTERVAL_MS = 1_000L
