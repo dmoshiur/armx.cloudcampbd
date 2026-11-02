@@ -45,7 +45,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build the repository-root Dockerfile
-        run: docker build --file Dockerfile --tag armx:ci .
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          docker build --progress=plain --file Dockerfile --tag armx:ci . 2>&1 | tee /tmp/armx-docker-build.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            message="$(tail -n 80 /tmp/armx-docker-build.log)"
+            message="${message//'%'/'%25'}"
+            message="${message//$'\r'/'%0D'}"
+            message="${message//$'\n'/'%0A'}"
+            echo "::error title=Root Docker image build failed::$message"
+            exit "$status"
+          fi
       - name: Start the full stack with a non-default runtime port
         run: |
           docker run --detach --name armx-smoke \
