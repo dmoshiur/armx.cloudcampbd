@@ -131,7 +131,7 @@ class ArmxErrorState extends StatelessWidget {
       decoration: BoxDecoration(
         color: ArmxColors.danger.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(ArmxTheme.radiusMd),
-        border: Border.all(color: ArmxColors.danger.withOpacity(0.4)),
+        border: Border.all(color: ArmxColors.danger.withValues(alpha: 0.4)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
