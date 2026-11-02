@@ -69,9 +69,11 @@ class WakeWordService extends ChangeNotifier {
     state = WakeWordState.listening;
     notifyListeners();
     await _speech.listen(
-      listenFor: const Duration(seconds: 30),
-      pauseFor: const Duration(seconds: 5),
-      partialResults: true,
+      listenOptions: SpeechListenOptions(
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 5),
+        partialResults: true,
+      ),
       onResult: (result) {
         final spoken = result.recognizedWords.toLowerCase();
         if (spoken.contains(phrase)) {

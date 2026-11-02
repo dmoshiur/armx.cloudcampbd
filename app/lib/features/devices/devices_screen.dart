@@ -108,12 +108,13 @@ class _DevicesScreenState extends State<DevicesScreen> {
     if (ok != true || !mounted) return;
 
     final api = context.read<AuthController>().api;
+    final bridge = context.read<DeviceBridge>();
     try {
       final data = await api.post('/devices/${device['id']}/unlink/verify', {'password': passwordController.text})
           as Map<String, dynamic>;
       await api.post('/devices/${device['id']}/unlink', {'ticket': data['ticket']});
-      if (device['id'] == context.read<DeviceBridge>().deviceId) {
-        await context.read<DeviceBridge>().unlinkLocally();
+      if (device['id'] == bridge.deviceId) {
+        await bridge.unlinkLocally();
       }
       await _load();
     } on ApiException catch (e) {
