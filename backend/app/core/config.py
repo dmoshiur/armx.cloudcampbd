@@ -5,9 +5,11 @@ production when a required secret is missing or still a placeholder value.
 """
 from __future__ import annotations
 
+import base64
 import os
 from functools import lru_cache
-from typing import Literal
+from pathlib import Path
+from typing import Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -42,10 +44,19 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     # --- database ----------------------------------------------------------
+    # Local SQLite remains the zero-configuration development default. In
+    # production, TURSO_* enables a local embedded replica backed by Turso.
     DATABASE_URL: str = "sqlite+aiosqlite:///./armx.db"
     DB_ECHO: bool = False
     AUTO_CREATE_TABLES: bool = True
+    TURSO_DATABASE_URL: str = ""
+    TURSO_AUTH_TOKEN: str = ""
+    TURSO_REPLICA_PATH: str = "/data/turso-replica.db"
+    TURSO_SYNC_INTERVAL_SECONDS: int = Field(default=30, ge=5, le=3600)
+    REQUIRE_TURSO_IN_PRODUCTION: bool = False
 
+    # Optional. A single API process has a process-local limiter; Redis is only
+    # needed when HTTP traffic is spread over multiple API replicas.
     REDIS_URL: str = ""
 
     # --- auth --------------------------------------------------------------
@@ -58,12 +69,30 @@ class Settings(BaseSettings):
     LOGIN_LOCKOUT_MINUTES: int = 15
     REQUIRE_EMAIL_VERIFICATION: bool = False
 
-    # --- bootstrap of the first admin (CLI only) ---------------------------
+    # --- secure first-run bootstrap ---------------------------------------
+    # Environment seeding is one-shot: it creates an admin only when no admin
+    # exists and never rotates an existing password. The protected setup page
+    # is the alternative; it requires INITIAL_SETUP_TOKEN.
     FIRST_ADMIN_EMAIL: str = ""
     FIRST_ADMIN_PASSWORD: str = ""
+    FIRST_ADMIN_DISPLAY_NAME: str = "Platform owner"
+    INITIAL_SETUP_TOKEN: str = ""
 
     # --- LLM ---------------------------------------------------------------
-    LLM_PROVIDER: Literal["claude", "openai", "mock"] = "mock"
+    # "groq" is the production default. Provider/model rows in the database
+    # take precedence and are balanced within a priority tier with failover.
+    LLM_PROVIDER: str = "groq"
+    LLM_ROUTING_STRATEGY: Literal["balanced", "priority"] = "balanced"
+    LLM_SECRETS_KEY: str = ""
+    LLM_MAX_TOKENS: int = 4096
+    LLM_TIMEOUT_SECONDS: float = Field(default=60.0, ge=3.0, le=300.0)
+    LLM_FAILURE_THRESHOLD: int = Field(default=3, ge=1, le=20)
+    LLM_CIRCUIT_COOLDOWN_SECONDS: int = Field(default=60, ge=10, le=3600)
+    HARNESS_MAX_STEPS: int = 8
+
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_API_KEYS: str = ""  # comma separated pool of the owner's own keys
     ANTHROPIC_MODEL: str = "claude-sonnet-4-5-20250929"
@@ -71,9 +100,6 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
-    LLM_MAX_TOKENS: int = 2048
-    LLM_TIMEOUT_SECONDS: float = 60.0
-    HARNESS_MAX_STEPS: int = 8
 
     # --- email -------------------------------------------------------------
     SMTP_HOST: str = ""
@@ -141,6 +167,29 @@ class Settings(BaseSettings):
         return self.ENV == "production"
 
     @property
+    def turso_enabled(self) -> bool:
+        return bool(self.TURSO_DATABASE_URL and self.TURSO_AUTH_TOKEN)
+
+    @property
+    def effective_database_url(self) -> str:
+        if not self.turso_enabled:
+            return self.DATABASE_URL
+        path = str(Path(self.TURSO_REPLICA_PATH).expanduser())
+        return f"sqlite+aioturso_sync:///{path}"
+
+    @property
+    def database_connect_args(self) -> dict[str, Any]:
+        if not self.turso_enabled:
+            return {}
+        return {
+            "remote_url": self.TURSO_DATABASE_URL,
+            "auth_token": self.TURSO_AUTH_TOKEN,
+            "client_name": "armx-render",
+            "bootstrap_if_empty": True,
+            "long_poll_timeout_ms": 1000,
+        }
+
+    @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
@@ -170,18 +219,41 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _production_guards(self) -> "Settings":
-        """Refuse to boot in production with a missing or placeholder secret."""
+        """Reject partial integrations and unsafe production configuration."""
+        if bool(self.TURSO_DATABASE_URL) != bool(self.TURSO_AUTH_TOKEN):
+            raise RuntimeError("Set both TURSO_DATABASE_URL and TURSO_AUTH_TOKEN, or neither")
+        if self.TURSO_DATABASE_URL and not self.TURSO_DATABASE_URL.startswith(
+            ("https://", "libsql://", "turso://")
+        ):
+            raise RuntimeError("TURSO_DATABASE_URL must use https://, libsql://, or turso://")
+        if bool(self.FIRST_ADMIN_EMAIL) != bool(self.FIRST_ADMIN_PASSWORD):
+            raise RuntimeError("Set both FIRST_ADMIN_EMAIL and FIRST_ADMIN_PASSWORD, or neither")
+        if self.FIRST_ADMIN_PASSWORD:
+            password = self.FIRST_ADMIN_PASSWORD
+            if len(password) < 10 or password.lower() == password or password.isalnum():
+                raise RuntimeError(
+                    "FIRST_ADMIN_PASSWORD must be at least 10 characters with an uppercase letter and symbol"
+                )
+        if self.INITIAL_SETUP_TOKEN and len(self.INITIAL_SETUP_TOKEN) < 32:
+            raise RuntimeError("INITIAL_SETUP_TOKEN must be at least 32 characters")
+        if self.LLM_SECRETS_KEY:
+            try:
+                decoded = base64.urlsafe_b64decode(self.LLM_SECRETS_KEY.encode("ascii"))
+            except Exception as exc:
+                raise RuntimeError("LLM_SECRETS_KEY must be a URL-safe base64 key") from exc
+            if len(decoded) != 32:
+                raise RuntimeError("LLM_SECRETS_KEY must decode to exactly 32 bytes")
+
         if not self.is_production:
             return self
 
         required = {
             "JWT_SECRET": self.JWT_SECRET,
-            "DATABASE_URL": self.DATABASE_URL,
+            "DATABASE": self.effective_database_url,
+            "LLM_SECRETS_KEY": self.LLM_SECRETS_KEY,
         }
-        if self.LLM_PROVIDER == "claude":
-            required["ANTHROPIC_API_KEY/ANTHROPIC_API_KEYS"] = self.ANTHROPIC_API_KEY or self.ANTHROPIC_API_KEYS
-        if self.LLM_PROVIDER == "openai":
-            required["OPENAI_API_KEY"] = self.OPENAI_API_KEY
+        if self.REQUIRE_TURSO_IN_PRODUCTION and not self.turso_enabled:
+            raise RuntimeError("Turso is required: set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN")
         if self.AUTO_CREATE_TABLES:
             raise RuntimeError("AUTO_CREATE_TABLES must be false in production; run alembic upgrade head")
         if self.DEBUG:
@@ -195,8 +267,12 @@ class Settings(BaseSettings):
             raise RuntimeError(
                 "Refusing to boot in production with missing/placeholder secrets: " + ", ".join(problems)
             )
+        if len(self.JWT_SECRET) < 32:
+            raise RuntimeError("JWT_SECRET must be at least 32 characters in production")
         if not self.WEB_ORIGIN.startswith("https://"):
             raise RuntimeError("WEB_ORIGIN must be https in production")
+        if self.turso_enabled and not Path(self.TURSO_REPLICA_PATH).is_absolute():
+            raise RuntimeError("TURSO_REPLICA_PATH must be absolute in production")
         return self
 
 

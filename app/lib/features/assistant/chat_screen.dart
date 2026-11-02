@@ -32,7 +32,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
   String? _conversationId;
   String? _runId;
-  Map<String, dynamic>? _pendingApproval;
   bool _busy = false;
   String? _error;
   StreamSubscription<String>? _wakeSub;
@@ -93,7 +92,6 @@ class _ChatScreenState extends State<ChatScreen> {
           events: events,
           approval: approval,
         ));
-        _pendingApproval = approval;
       });
 
       if (approval != null && mounted) {
@@ -132,7 +130,6 @@ class _ChatScreenState extends State<ChatScreen> {
               : ((data['reply'] as String?) ?? 'Done.'),
           events: events,
         ));
-        _pendingApproval = null;
       });
     } on ApiException catch (e) {
       setState(() => _error = e.message);

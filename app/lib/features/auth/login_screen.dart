@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 
 import '../../core/app_state.dart';
 import '../../core/theme.dart';
-import '../../core/widgets/primitives.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, required this.apiBase, required this.onNeedsSignup});

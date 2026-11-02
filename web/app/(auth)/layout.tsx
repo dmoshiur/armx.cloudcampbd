@@ -13,7 +13,7 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
         </Link>
         <h1 className="mt-8 text-display text-balance">An assistant that asks before it acts.</h1>
         <p className="mt-4 max-w-md text-body text-fgmuted">
-          Claude plans. A security gateway decides. Every medium- and high-risk action waits for your explicit,
+          Healthy models plan through a balanced provider pool. A security gateway decides. Every medium- and high-risk action waits for your explicit,
           single-use approval — and the kill-switch stops everything at once.
         </p>
         <ul className="mt-8 space-y-3 text-body text-fgmuted">

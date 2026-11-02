@@ -12,7 +12,7 @@ permissions:
 jobs:
   tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -37,7 +37,31 @@ jobs:
           npm ci --no-audit --no-fund
           npm audit --audit-level=low
           npm run typecheck
+          npm run build
         working-directory: web
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.35.7"
+          channel: stable
+          cache: true
+      - name: Analyze and compile Flutter Android client
+        run: |
+          flutter pub get
+          if ! analyze_output="$(flutter analyze 2>&1)"; then
+            printf '%s\n' "$analyze_output"
+            annotation="$(printf '%s\n' "$analyze_output" | tail -40 | awk '{gsub(/%/, "%25"); gsub(/\r/, "%0D"); printf "%s%%0A", $0}')"
+            echo "::error title=Flutter analyze failed::$annotation"
+            exit 1
+          fi
+          printf '%s\n' "$analyze_output"
+          if ! build_output="$(flutter build apk --debug 2>&1)"; then
+            printf '%s\n' "$build_output"
+            annotation="$(printf '%s\n' "$build_output" | tail -60 | awk '{gsub(/%/, "%25"); gsub(/\r/, "%0D"); printf "%s%%0A", $0}')"
+            echo "::error title=Flutter Android build failed::$annotation"
+            exit 1
+          fi
+          printf '%s\n' "$build_output"
+        working-directory: app
 
   root-image:
     runs-on: ubuntu-latest
@@ -65,6 +89,8 @@ jobs:
           docker run --detach --name armx-smoke \
             --publish 8080:8080 \
             --env PORT=8080 \
+            --env ENV=development \
+            --env REQUIRE_TURSO_IN_PRODUCTION=false \
             --env JWT_SECRET="$(openssl rand -hex 32)" \
             --env RENDER_EXTERNAL_URL=https://armx-ci.example \
             --env LLM_PROVIDER=mock \

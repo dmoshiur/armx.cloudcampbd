@@ -127,6 +127,8 @@ export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) }),
+  put: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: "PUT", body: body === undefined ? undefined : JSON.stringify(body) }),
   patch: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "PATCH", body: body === undefined ? undefined : JSON.stringify(body) }),
   del: <T>(path: string) => request<T>(path, { method: "DELETE" }),
@@ -134,5 +136,27 @@ export const api = {
     const form = new FormData();
     form.append("file", file);
     return request<T>(path, { method: "POST", body: form });
+  },
+  blob: async (path: string): Promise<Blob | null> => {
+    const send = () => {
+      const token = tokenStore.access();
+      return fetch(`${API}${path}`, {
+        cache: "no-store",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+    };
+    let response = await send();
+    if (response.status === 401 && (await refreshOnce())) response = await send();
+    if (response.status === 204) return null;
+    if (!response.ok) {
+      let payload: unknown = null;
+      try {
+        payload = await response.json();
+      } catch {
+        // Keep the status text fallback for non-JSON proxy errors.
+      }
+      throw new ApiError(messageFrom(payload, response.statusText), response.status, undefined, payload);
+    }
+    return response.blob();
   },
 };

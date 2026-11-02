@@ -3,16 +3,16 @@ import 'package:flutter/material.dart';
 /// Design tokens. These mirror `design/tokens.json` exactly - the single source
 /// of truth shared with the web app and the deploy pipeline's design lint.
 class ArmxColors {
-  static const ink = Color(0xFF0B1220);
-  static const navy = Color(0xFF101935);
-  static const accent = Color(0xFF5B8CFF);
-  static const accent2 = Color(0xFF8B5CF6);
-  static const fog = Color(0xFFF4F6FB);
-  static const line = Color(0xFFD7DCEA);
-  static const muted = Color(0xFF5B6475);
-  static const success = Color(0xFF22C55E);
-  static const warning = Color(0xFFF59E0B);
-  static const danger = Color(0xFFEF4444);
+  static const ink = Color(0xFF020904);
+  static const navy = Color(0xFF06120A);
+  static const accent = Color(0xFF00FF41);
+  static const accent2 = Color(0xFF00B82E);
+  static const fog = Color(0xFFD7FFE1);
+  static const line = Color(0xFF174D24);
+  static const muted = Color(0xFF75A881);
+  static const success = Color(0xFF00D938);
+  static const warning = Color(0xFFF5C542);
+  static const danger = Color(0xFFFF4D67);
 }
 
 class ArmxTheme {
@@ -29,11 +29,11 @@ class ArmxTheme {
 
   static ThemeData _build(Brightness brightness) {
     final isDark = brightness == Brightness.dark;
-    final background = isDark ? ArmxColors.ink : ArmxColors.fog;
+    final background = isDark ? ArmxColors.ink : const Color(0xFFECFFF0);
     final surface = isDark ? ArmxColors.navy : Colors.white;
     final text = isDark ? ArmxColors.fog : ArmxColors.ink;
-    final textMuted = isDark ? const Color(0xFF9AA4B8) : ArmxColors.muted;
-    final border = isDark ? const Color(0xFF1E2A47) : ArmxColors.line;
+    final textMuted = isDark ? ArmxColors.muted : const Color(0xFF386B45);
+    final border = isDark ? ArmxColors.line : const Color(0xFFA8DDB4);
 
     final base = ThemeData(
       useMaterial3: true,
@@ -47,7 +47,7 @@ class ArmxTheme {
         onSurface: text,
         error: ArmxColors.danger,
       ),
-      scaffoldBackgroundColor: background,
+      scaffoldBackgroundColor: Colors.transparent,
       fontFamily: 'Inter',
     );
 
@@ -60,7 +60,7 @@ class ArmxTheme {
         bodyMedium: TextStyle(fontSize: 15, height: 1.5, color: text),
         bodySmall: TextStyle(fontSize: 13, height: 1.45, color: textMuted),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: surface,
         elevation: 0,
         margin: EdgeInsets.zero,

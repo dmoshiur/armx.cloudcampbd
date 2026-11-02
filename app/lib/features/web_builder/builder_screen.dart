@@ -63,6 +63,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
       var runId = data['run_id'] as String?;
 
       while (approval != null && runId != null) {
+        if (!mounted) return;
         final approved = await showApprovalSheet(
           context,
           tool: approval['tool'] as String,

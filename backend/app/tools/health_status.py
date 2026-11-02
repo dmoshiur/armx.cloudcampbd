@@ -4,7 +4,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from app.integrations import health as health_registry
-from app.llm.factory import provider_status
+from app.llm.factory import provider_status_async
 from app.registry import RiskTier, ToolContext, ToolResult, tool
 
 
@@ -30,7 +30,7 @@ async def health_status(ctx: ToolContext, payload: HealthInput) -> ToolResult:
     from app.security import kill_switch_engaged
 
     data = {
-        "planner": provider_status(),
+        "planner": await provider_status_async(ctx.db),
         "kill_switch": "on" if await kill_switch_engaged(ctx.db) else "off",
         "integrations": health_registry.snapshot() if payload.include_integrations else [],
         "note": "Simulated providers are labelled; nothing here is silently faked.",

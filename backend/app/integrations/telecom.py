@@ -26,7 +26,11 @@ ALLOWED_COMMANDS = {
     "unlock_pc",
     "speak",
     "start_screen_share",
+    "request_screen_share",
     "end_screen_share",
+    "request_voice_session",
+    "end_voice_session",
+    "apply_management_policy",
     "ring",
 }
 

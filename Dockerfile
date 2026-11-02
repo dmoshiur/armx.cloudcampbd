@@ -58,7 +58,9 @@ ENV PATH="/opt/venv/bin:$PATH" \
     ENV=production \
     DEBUG=false \
     AUTO_CREATE_TABLES=false \
-    LLM_PROVIDER=mock \
+    LLM_PROVIDER=groq \
+    REQUIRE_TURSO_IN_PRODUCTION=true \
+    TURSO_REPLICA_PATH=/data/turso-replica.db \
     DATABASE_URL=sqlite+aiosqlite:////data/armx.db \
     PROJECT_WORKSPACE=/data/workspace
 

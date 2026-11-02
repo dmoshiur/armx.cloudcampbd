@@ -104,7 +104,7 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
                           child: ListTile(
                             selected: i == _index,
-                            selectedTileColor: ArmxColors.accent.withOpacity(0.12),
+                            selectedTileColor: ArmxColors.accent.withValues(alpha: 0.12),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(ArmxTheme.radiusMd)),
                             leading: Icon(widget.items[i].icon),
                             title: Text(widget.items[i].label),

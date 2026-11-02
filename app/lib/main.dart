@@ -5,6 +5,7 @@ import 'core/api_client.dart';
 import 'core/app_state.dart';
 import 'core/theme.dart';
 import 'core/widgets/adaptive_scaffold.dart';
+import 'core/widgets/matrix_background.dart';
 import 'features/admin/admin_screen.dart';
 import 'features/alarms/alarms_screen.dart';
 import 'features/assistant/chat_screen.dart';
@@ -13,6 +14,8 @@ import 'features/devices/devices_screen.dart';
 import 'features/device_bridge/device_bridge.dart';
 import 'features/guest_greeter/guest_greeter_screen.dart';
 import 'features/messaging/messaging_screen.dart';
+import 'features/managed_device/managed_device_controller.dart';
+import 'features/managed_device/managed_device_screen.dart';
 import 'features/settings/settings_screen.dart';
 import 'features/smart_home/smart_home_screen.dart';
 import 'features/voice/wake_word_service.dart';
@@ -35,6 +38,7 @@ class ArmxApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AuthController(api)..bootstrap()),
         ChangeNotifierProvider(create: (_) => WakeWordService()),
         ChangeNotifierProvider(create: (_) => DeviceBridge(api)..init()),
+        ChangeNotifierProvider(create: (_) => ManagedDeviceController()..init()),
       ],
       child: Consumer<AuthController>(
         builder: (context, auth, _) {
@@ -43,6 +47,7 @@ class ArmxApp extends StatelessWidget {
             title: 'A.R.M.X AI',
             debugShowCheckedModeBanner: false,
             theme: theme,
+            builder: (context, child) => MatrixBackground(child: child ?? const SizedBox.shrink()),
             home: auth.status == AuthStatus.signedIn
                 ? const _Home()
                 : LoginScreen(apiBase: api.baseUrl, onNeedsSignup: () {}),
@@ -64,6 +69,7 @@ class _Home extends StatelessWidget {
       NavItem(label: 'Assistant', icon: Icons.auto_awesome_outlined, builder: (_) => const ChatScreen()),
       NavItem(label: 'Home', icon: Icons.lightbulb_outline, builder: (_) => const SmartHomeScreen()),
       NavItem(label: 'Devices', icon: Icons.devices_other_outlined, builder: (_) => const DevicesScreen()),
+      NavItem(label: 'Managed', icon: Icons.admin_panel_settings_outlined, builder: (_) => const ManagedDeviceScreen()),
       NavItem(label: 'Alarms', icon: Icons.alarm_outlined, builder: (_) => const AlarmsScreen()),
       NavItem(label: 'Builder', icon: Icons.dashboard_customize_outlined, builder: (_) => const BuilderScreen()),
       NavItem(label: 'Messaging', icon: Icons.chat_bubble_outline, builder: (_) => const MessagingScreen()),

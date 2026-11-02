@@ -19,8 +19,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import audit
-from app.core.db import as_utc, get_db
+from app.core.db import as_utc, get_db, utcnow
 from app.core.deps import AuthContext, get_auth_context, client_ip
+from app.core.mirror import mirror_frames
 from app.core.security import (
     constant_time_compare,
     hash_password,
@@ -31,10 +32,10 @@ from app.core.security import (
 )
 from app.integrations import telecom
 from app.models import (
+    DeviceConsentSession,
     DeviceStatus,
     DeviceUnlinkEvent,
     LinkedDevice,
-    ScreenShareSession,
     User,
 )
 from app.security.tickets import DEVICE_PROOF_TICKET, UNLINK_TICKET, issue_ticket
@@ -42,6 +43,17 @@ from app.security.tickets import DEVICE_PROOF_TICKET, UNLINK_TICKET, issue_ticke
 router = APIRouter(prefix="/devices", tags=["devices"])
 
 MAX_DEVICES = 10
+SUPPORTED_CAPABILITIES = {
+    "alarm",
+    "app_launch",
+    "state",
+    "calls",
+    "speak",
+    "management",
+    "screen_share",
+    "voice",
+    "usage",
+}
 
 
 class PairingRequestModel(BaseModel):
@@ -127,7 +139,7 @@ async def request_pairing(
     if len([d for d in active if d.status != DeviceStatus.REVOKED.value]) >= MAX_DEVICES:
         raise HTTPException(status_code=400, detail=f"Device limit reached ({MAX_DEVICES})")
 
-    unknown = set(payload.capabilities) - {"alarm", "app_launch", "state", "calls", "speak"}
+    unknown = set(payload.capabilities) - SUPPORTED_CAPABILITIES
     if unknown:
         raise HTTPException(status_code=400, detail=f"Unsupported capabilities: {sorted(unknown)}")
 
@@ -180,8 +192,7 @@ async def confirm_pairing(
     if payload.platform:
         device.platform = payload.platform
     if payload.capabilities is not None:
-        allowed = {"alarm", "app_launch", "state", "calls", "speak"}
-        unknown = set(payload.capabilities) - allowed
+        unknown = set(payload.capabilities) - SUPPORTED_CAPABILITIES
         if unknown:
             raise HTTPException(status_code=400, detail=f"Unsupported capabilities: {sorted(unknown)}")
         device.capabilities = ",".join(sorted(set(payload.capabilities)))
@@ -312,8 +323,11 @@ async def device_auth(
         raise HTTPException(status_code=401, detail="Device is not linked")
     if not constant_time_compare(device.device_token_hash, hash_token(x_device_token)):
         raise HTTPException(status_code=401, detail="Device token rejected")
-    device.last_seen_at = datetime.now(timezone.utc)
-    await db.commit()
+    now = datetime.now(timezone.utc)
+    last_seen = as_utc(device.last_seen_at)
+    if last_seen is None or last_seen < now - timedelta(minutes=2):
+        device.last_seen_at = now
+        await db.commit()
     return device
 
 
@@ -327,6 +341,7 @@ async def poll_commands(
         raise HTTPException(status_code=403, detail="Token does not match this device")
     rows = await telecom.pending_commands(db, device.id)
     out = []
+    changed = False
     for cmd in rows:
         out.append(
             {
@@ -339,7 +354,9 @@ async def poll_commands(
         )
         if cmd.status == "queued":
             cmd.status = "delivered"
-    await db.commit()
+            changed = True
+    if changed:
+        await db.commit()
     return out
 
 
@@ -370,8 +387,6 @@ async def update_notification(
     """The persistent 'Linked' notification cannot be switched off - only acknowledged."""
     if device.id != device_id:
         raise HTTPException(status_code=403, detail="Token does not match this device")
-    from app.core.db import utcnow
-
     device.notification_ack_at = utcnow()
     device.persistent_notification = True
     await db.commit()
@@ -397,26 +412,63 @@ async def mint_unlock_proof(
 async def start_screen_share(
     device_id: str, ctx: AuthContext = Depends(get_auth_context), db: AsyncSession = Depends(get_db)
 ) -> dict[str, Any]:
+    """Request sharing; Android must still show and approve MediaProjection."""
     device = await _owned_device(db, ctx.user, device_id)
     if device.status != DeviceStatus.ACTIVE.value:
         raise HTTPException(status_code=400, detail="Device is not linked")
+    if "screen_share" not in {value for value in device.capabilities.split(",") if value}:
+        raise HTTPException(status_code=403, detail="Device link did not grant screen sharing")
     existing = (
         await db.execute(
-            select(ScreenShareSession).where(ScreenShareSession.device_id == device.id, ScreenShareSession.status == "active")
+            select(DeviceConsentSession).where(
+                DeviceConsentSession.device_id == device.id,
+                DeviceConsentSession.kind == "screen_share",
+                DeviceConsentSession.status.in_(("requested", "active")),
+            )
         )
     ).scalar_one_or_none()
+    if existing and as_utc(existing.expires_at) <= datetime.now(timezone.utc):
+        existing.status = "expired"
+        existing.ended_at = utcnow()
+        existing.ended_by = "expiry"
+        await db.commit()
+        await mirror_frames.remove(existing.id)
+        existing = None
     if existing:
-        raise HTTPException(status_code=409, detail="A screen-share session is already active")
+        raise HTTPException(status_code=409, detail="A screen-share request or session already exists")
 
-    session = ScreenShareSession(device_id=device.id, started_by=ctx.user.id, status="active")
+    session = DeviceConsentSession(
+        device_id=device.id,
+        requested_by=ctx.user.id,
+        kind="screen_share",
+        status="requested",
+        scopes='["screen"]',
+        visible_indicator=True,
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=2),
+    )
     db.add(session)
     await db.commit()
     await db.refresh(session)
     await telecom.queue_command(
-        db, user_id=ctx.user.id, device=device, command="start_screen_share", payload={"session_id": session.id}
+        db,
+        user_id=ctx.user.id,
+        device=device,
+        command="request_screen_share",
+        payload={"session_id": session.id, "expires_at": session.expires_at.isoformat()},
     )
-    await audit(db, action="device.screen_share_started", actor=ctx.user, target=device.id)
-    return {"session_id": session.id, "status": "active", "notice": "The device now shows a sharing indicator."}
+    await audit(
+        db,
+        action="device.screen_share_requested",
+        actor=ctx.user,
+        target=device.id,
+        detail={"session_id": session.id, "system_consent_required": True},
+    )
+    return {
+        "session_id": session.id,
+        "status": "requested",
+        "active": False,
+        "notice": "The device must approve Android screen-capture consent. Sharing is not active yet.",
+    }
 
 
 @router.post("/{device_id}/screen-share/stop", status_code=204)
@@ -426,17 +478,23 @@ async def stop_screen_share(
     device = await _owned_device(db, ctx.user, device_id)
     rows = (
         await db.execute(
-            select(ScreenShareSession).where(ScreenShareSession.device_id == device.id, ScreenShareSession.status == "active")
+            select(DeviceConsentSession).where(
+                DeviceConsentSession.device_id == device.id,
+                DeviceConsentSession.kind == "screen_share",
+                DeviceConsentSession.status.in_(("requested", "active")),
+            )
         )
     ).scalars().all()
-    from app.core.db import utcnow
-
-    for s in rows:
-        s.status = "ended"
-        s.ended_at = utcnow()
-        s.ended_by = ctx.user.id
+    for session in rows:
+        session.status = "ended"
+        session.ended_at = utcnow()
+        session.ended_by = ctx.user.id
     await db.commit()
-    await telecom.queue_command(db, user_id=ctx.user.id, device=device, command="end_screen_share", payload={})
+    for session in rows:
+        await mirror_frames.remove(session.id)
+    await telecom.queue_command(
+        db, user_id=ctx.user.id, device=device, command="end_screen_share", payload={}
+    )
     await audit(db, action="device.screen_share_stopped", actor=ctx.user, target=device.id)
     return Response(status_code=204)
 
@@ -448,11 +506,28 @@ async def screen_share_status(
     device = await _owned_device(db, ctx.user, device_id)
     session = (
         await db.execute(
-            select(ScreenShareSession).where(ScreenShareSession.device_id == device.id, ScreenShareSession.status == "active")
+            select(DeviceConsentSession)
+            .where(
+                DeviceConsentSession.device_id == device.id,
+                DeviceConsentSession.kind == "screen_share",
+                DeviceConsentSession.status.in_(("requested", "active")),
+            )
+            .order_by(DeviceConsentSession.requested_at.desc())
+            .limit(1)
         )
     ).scalar_one_or_none()
+    if session and as_utc(session.expires_at) <= datetime.now(timezone.utc):
+        session.status = "expired"
+        session.ended_at = utcnow()
+        session.ended_by = "expiry"
+        await db.commit()
+        await mirror_frames.remove(session.id)
+        session = None
     return {
-        "active": session is not None,
+        "active": session is not None and session.status == "active",
+        "status": session.status if session else "inactive",
         "session_id": session.id if session else None,
-        "started_at": session.started_at.isoformat() if session else None,
+        "requested_at": session.requested_at.isoformat() if session else None,
+        "consented_at": session.consented_at.isoformat() if session and session.consented_at else None,
+        "visible_indicator": session.visible_indicator if session else False,
     }

@@ -2,24 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Semantic surface variables. Dark is the default; light swaps ink/navy for fog/white
-   and keeps the accents fixed, exactly as the design tokens specify. */
+/* CMatrix semantic surfaces. Dark is the default; light preserves the green
+   identity while meeting text contrast requirements. */
 :root,
 html.dark {
-  --bg: 11 18 32;          /* ink   #0B1220 */
-  --surface: 16 25 53;     /* navy  #101935 */
-  --border: 30 42 71;
-  --text: 244 246 251;     /* fog   #F4F6FB */
-  --text-muted: 154 164 184;
+  --bg: 2 9 4;             /* ink     #020904 */
+  --surface: 6 18 10;      /* matrix  #06120A */
+  --border: 23 77 36;
+  --text: 215 255 225;
+  --text-muted: 117 168 129;
   color-scheme: dark;
 }
 
 html.light {
-  --bg: 244 246 251;       /* fog   */
-  --surface: 255 255 255;  /* white */
-  --border: 215 220 234;   /* line  */
-  --text: 11 18 32;        /* ink   */
-  --text-muted: 91 100 117;/* muted */
+  --bg: 236 255 240;
+  --surface: 255 255 255;
+  --border: 168 221 180;
+  --text: 2 9 4;
+  --text-muted: 56 107 69;
   color-scheme: light;
 }
 
@@ -33,6 +33,54 @@ body {
   /* No webfont CDN: Inter when present on the device, system grotesk otherwise. */
   font-family: Inter, "Inter var", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   text-rendering: optimizeLegibility;
+  background-image: radial-gradient(circle at 50% -20%, rgb(0 255 65 / 0.08), transparent 45%);
+}
+
+.matrix-background {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0.72;
+}
+
+.matrix-background::before {
+  content: "";
+  position: absolute;
+  inset: -100% -10% 0;
+  background-image:
+    repeating-linear-gradient(90deg, transparent 0 45px, rgb(0 255 65 / 0.035) 46px, transparent 47px 92px),
+    repeating-linear-gradient(0deg, transparent 0 19px, rgb(0 255 65 / 0.05) 20px, transparent 21px 39px),
+    linear-gradient(180deg, transparent 0%, rgb(0 255 65 / 0.13) 48%, transparent 70%);
+  background-size: 92px 100%, 100% 40px, 100% 62%;
+  mask-image: linear-gradient(90deg, transparent, black 12%, black 88%, transparent);
+  animation: matrix-stream 22s linear infinite;
+  will-change: transform;
+}
+
+.matrix-background::after {
+  content: "01 10 00 11 01 01 10 11 00 10 01 11 00";
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: rgb(0 255 65 / 0.04);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: clamp(2.5rem, 7vw, 8rem);
+  line-height: 1.8;
+  letter-spacing: 0.5em;
+  word-break: break-all;
+  transform: rotate(-8deg) scale(1.2);
+}
+
+body > :not(.matrix-background) {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes matrix-stream {
+  from { transform: translate3d(0, -32%, 0); }
+  to { transform: translate3d(0, 32%, 0); }
 }
 
 /* One visible focus treatment everywhere. */

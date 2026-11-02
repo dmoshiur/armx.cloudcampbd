@@ -65,9 +65,9 @@ class ArmxBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withOpacity(0.45)),
+        border: Border.all(color: color.withValues(alpha: 0.45)),
       ),
       child: Text(
         label,
@@ -129,9 +129,9 @@ class ArmxErrorState extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: ArmxColors.danger.withOpacity(0.08),
+        color: ArmxColors.danger.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(ArmxTheme.radiusMd),
-        border: Border.all(color: ArmxColors.danger.withOpacity(0.4)),
+        border: Border.all(color: ArmxColors.danger.withValues(alpha: 0.4)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

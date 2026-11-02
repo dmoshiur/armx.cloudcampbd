@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="LaunchTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:forceDarkAllowed">false</item>
+        <item name="android:windowBackground">#020904</item>
+        <item name="android:navigationBarColor">#020904</item>
+        <item name="android:statusBarColor">#020904</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+    <style name="NormalTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#020904</item>
+        <item name="android:navigationBarColor">#020904</item>
+        <item name="android:statusBarColor">#020904</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

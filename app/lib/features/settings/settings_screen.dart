@@ -40,19 +40,23 @@ class SettingsScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const ArmxSectionHeader(title: 'Appearance'),
-              RadioListTile<String>(
-                value: 'dark',
+              RadioGroup<String>(
                 groupValue: auth.themeMode,
                 onChanged: (value) => auth.setTheme(value ?? 'dark'),
-                title: const Text('Dark (default)'),
-                contentPadding: EdgeInsets.zero,
-              ),
-              RadioListTile<String>(
-                value: 'light',
-                groupValue: auth.themeMode,
-                onChanged: (value) => auth.setTheme(value ?? 'dark'),
-                title: const Text('Light'),
-                contentPadding: EdgeInsets.zero,
+                child: const Column(
+                  children: [
+                    RadioListTile<String>(
+                      value: 'dark',
+                      title: Text('Dark (default)'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    RadioListTile<String>(
+                      value: 'light',
+                      title: Text('Light'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -98,15 +102,15 @@ class SettingsScreen extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 12),
-        ArmxCard(
+        const ArmxCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const ArmxSectionHeader(title: 'What this app can and cannot do'),
-              const _Capability(text: 'Wake word and background listening: available here, on-device detection only.'),
-              const _Capability(text: 'Push-to-talk: always available. Web has push-to-talk only.'),
-              const _Capability(text: 'Call control and app launch: only on your own linked device, always visible.'),
-              const _Capability(text: 'Call recording, SMS reading, silent capture: never implemented.'),
+              ArmxSectionHeader(title: 'What this app can and cannot do'),
+              _Capability(text: 'Wake word and background listening: available here, on-device detection only.'),
+              _Capability(text: 'Push-to-talk: always available. Web has push-to-talk only.'),
+              _Capability(text: 'Call control and app launch: only on your own linked device, always visible.'),
+              _Capability(text: 'Call recording, SMS reading, silent capture: never implemented.'),
             ],
           ),
         ),

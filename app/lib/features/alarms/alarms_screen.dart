@@ -39,13 +39,15 @@ class _AlarmsScreenState extends State<AlarmsScreen> {
         'message': 'set an alarm for $formatted labelled $_label',
       }) as Map<String, dynamic>;
       final events = ((data['tool_events'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      final eventResult = events.isNotEmpty ? events.first['result'] as Map? : null;
+      final eventMessage = (eventResult?['message'] ?? '').toString();
       if (mounted) {
         setState(() {
           _created.insert(0, {
             'time': formatted,
             'label': _label,
             'ok': events.isNotEmpty && events.first['ok'] == true,
-            'message': ((events.isNotEmpty ? (events.first['result'] as Map?)?['message'] : null) ?? '').toString(),
+            'message': eventMessage,
           });
         });
       }

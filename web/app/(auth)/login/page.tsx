@@ -32,7 +32,18 @@ function LoginForm() {
     if (code) setError(ERRORS[code] ?? "Sign-in failed. Try again.");
     if (params.get("reset") === "1") setNotice("Password updated. Sign in with your new password.");
     if (params.get("verified") === "1") setNotice("Email verified. You can sign in now.");
+    if (params.get("setup") === "complete") setNotice("Secure setup complete. Sign in as the platform owner.");
   }, [params]);
+
+  const { data: setup } = useQuery({
+    queryKey: ["setup", "status"],
+    queryFn: () => api.get<{ needs_setup: boolean }>("/setup/status"),
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (setup?.needs_setup) router.replace("/setup");
+  }, [router, setup]);
 
   const { data: config } = useQuery({
     queryKey: ["config"],

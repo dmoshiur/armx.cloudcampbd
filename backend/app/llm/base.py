@@ -42,6 +42,7 @@ class LLMResponse:
     refusal: str = ""
     error: str = ""
     model: str = ""
+    provider: str = ""
     usage: Usage = field(default_factory=Usage)
     raw_stop_reason: str = ""
 

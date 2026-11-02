@@ -41,7 +41,7 @@ async def web_generate(ctx: ToolContext, payload: WebGenerateInput) -> ToolResul
         )
     ).first()
 
-    result = await generator.generate(payload.prompt, name)
+    result = await generator.generate(payload.prompt, name, ctx.db)
     files_json = json.dumps(result.files)
     lint_json = json.dumps(result.lint.as_dict())
 

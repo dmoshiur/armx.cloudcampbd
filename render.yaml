@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: armx
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: ENV
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: AUTO_CREATE_TABLES
+        value: "false"
+      - key: REQUIRE_TURSO_IN_PRODUCTION
+        value: "true"
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+      - key: TURSO_REPLICA_PATH
+        value: /data/turso-replica.db
+      - key: JWT_SECRET
+        generateValue: true
+      - key: LLM_PROVIDER
+        value: groq
+      - key: LLM_ROUTING_STRATEGY
+        value: balanced
+      - key: LLM_SECRETS_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: FIRST_ADMIN_EMAIL
+        sync: false
+      - key: FIRST_ADMIN_PASSWORD
+        sync: false
+      - key: INITIAL_SETUP_TOKEN
+        sync: false
+      - key: PIPELINE_MODE
+        value: simulated
+    disk:
+      name: armx-data
+      mountPath: /data
+      sizeGB: 1

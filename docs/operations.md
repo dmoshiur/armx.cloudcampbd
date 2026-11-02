@@ -2,23 +2,26 @@
 
 ## Staged deployment
 
-1. **Local** — `make install && make dev && make test`. 68 tests must pass.
-2. **Staging** — same compose file with `ENV=staging`, a staging Postgres and
-   `LLM_PROVIDER=mock` (so nothing costs money). Walk the checklist below.
-3. **Production** — `ENV=production`, real keys, real domains. The app refuses to
-   boot if `JWT_SECRET` is a placeholder, if `AUTO_CREATE_TABLES` is true, or if
-   `WEB_ORIGIN` is not https.
+1. **Local** — `make install && make dev && make test`.
+2. **Staging** — use a separate Turso database and `LLM_PROVIDER=mock` so planner
+   tests cost nothing. Walk the checklist below.
+3. **Production** — `ENV=production`, real keys and the production Turso database.
+   The app refuses to boot with placeholder secrets, without Turso, with
+   `AUTO_CREATE_TABLES=true`, or when `WEB_ORIGIN` is not HTTPS.
 
 ### Pre-flight checklist
 
 - [ ] `JWT_SECRET` is ≥ 32 random bytes (`openssl rand -base64 48`)
-- [ ] `POSTGRES_PASSWORD`, `REDIS_PASSWORD` set
-- [ ] `ANTHROPIC_API_KEY` set; `LLM_PROVIDER=claude`
+- [ ] `TURSO_DATABASE_URL` and database auth `TURSO_AUTH_TOKEN` are paired
+- [ ] `LLM_SECRETS_KEY` is a stable Fernet key and has a separately secured copy
+- [ ] `GROQ_API_KEY` is set; preferred model is configurable with `GROQ_MODEL`
+- [ ] Either the `FIRST_ADMIN_*` pair or `INITIAL_SETUP_TOKEN` is set for first boot
 - [ ] SMTP configured (password reset fails closed without it in production)
-- [ ] `WEB_ORIGIN` / `CORS_ORIGINS` are the real https origin
+- [ ] `WEB_ORIGIN` / `CORS_ORIGINS` are the real HTTPS origin
 - [ ] `GITHUB_ALLOWED_TARGETS` (or `GITHUB_DEFAULT_ORG`) set before `PIPELINE_MODE=live`
-- [ ] `alembic upgrade head` has run (the api container does it on boot)
-- [ ] First admin created via the CLI, then verified by logging in
+- [ ] `alembic upgrade head` has run (the image entrypoint does it on boot)
+- [ ] First owner can log in; bootstrap password/token has been removed from Render
+- [ ] Admin → Models shows a healthy Groq route and configured failover routes
 - [ ] Kill-switch released and `/api/health` returns `status: ok`
 
 ## Single-container hosts (e.g. Render)
@@ -35,12 +38,13 @@ root rather than `web/` or `backend/`. Keep these settings:
 | Persistent data directory | `/data` (database, workspace and media) |
 | Runtime user | Non-root UID/GID `10001` |
 
-Nginx serves both the web app and `/api/*` on the same origin. FastAPI and Next.js
-bind only to container loopback; the worker runs alongside them under Supervisor.
-Ports `3000` and `8000` are reserved internally. Do not override the image command
-with `next start` or `uvicorn`: that would omit the other services and the proxy.
-The entrypoint renders the nginx port, validates configuration, runs
-`alembic upgrade head`, then starts Supervisor. A failed migration stops startup.
+Nginx serves the web app and `/api/*` on one origin. FastAPI and Next.js bind only
+to container loopback. Housekeeping and scheduled automations run as a task inside
+the API lifespan so a Turso embedded replica has exactly one process owner. Ports
+`3000` and `8000` are internal. Do not override the image command with `next start`
+or `uvicorn`: that omits services and the proxy. The entrypoint renders nginx,
+validates configuration, runs `alembic upgrade head`, then starts Supervisor. A
+failed migration or initial Turso synchronization stops startup.
 
 ### Required environment
 
@@ -51,27 +55,33 @@ The entrypoint renders the nginx port, validates configuration, runs
 - `WEB_ORIGIN`: the actual public HTTPS origin. On Render only, unset values are
   derived from `RENDER_EXTERNAL_URL`. An explicit value always wins.
 - `CORS_ORIGINS`: defaults to `WEB_ORIGIN` in the root entrypoint when unset.
-- `DATABASE_URL`: a managed PostgreSQL connection URL for production. The backend
-  accepts Render's `postgres://` and `postgresql://` forms and uses asyncpg.
-- `REDIS_URL`: a managed Redis URL for shared rate limits and gateway state.
-- `LLM_PROVIDER=mock` is the image default and is labelled offline. For Claude,
-  set `LLM_PROVIDER=claude` and `ANTHROPIC_API_KEY`; for OpenAI, set
-  `LLM_PROVIDER=openai` and `OPENAI_API_KEY`.
+- `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`: the application database and its
+  database auth token. Production requires both and ignores `DATABASE_URL` when
+  they are present.
+- `TURSO_REPLICA_PATH=/data/turso-replica.db`: local embedded replica. Keep one
+  Render instance attached to this path. Startup pushes pending local operations,
+  pulls remote changes, and refuses to become healthy when initial sync fails.
+- `LLM_SECRETS_KEY`: stable Fernet key used only for encrypted provider credentials.
+  Rotating it requires re-entering every admin-managed provider key.
+- `GROQ_API_KEY`: seeds Groq as priority 10 with configurable `GROQ_MODEL`.
+  `OPENAI_API_KEY` and Anthropic keys seed priority-20 fallbacks; all other public
+  OpenAI-compatible HTTPS providers are added in Admin → Models.
+- `FIRST_ADMIN_EMAIL` + `FIRST_ADMIN_PASSWORD`, or `INITIAL_SETUP_TOKEN`: choose one
+  first-run bootstrap. Neither path overwrites an existing administrator.
 
-The default SQLite URL is `sqlite+aiosqlite:////data/armx.db`; project files and
-media default to `/data/workspace` and `/data/media`. For a **single-instance
-evaluation only**, attach a persistent disk at `/data` instead of configuring
-Postgres. Ensure the mounted directory is writable by UID `10001`; a disk initialized
-with different ownership must be corrected by the host before startup. Do not run
-multiple replicas against SQLite or a local disk. Without a persistent disk,
-SQLite data and media are ephemeral. External Postgres does not make uploaded
-media persistent: mount `/data` for media/workspace storage as well.
+Mount `/data` and ensure it is writable by UID `10001`. Turso is authoritative,
+but the disk avoids a full replica bootstrap and preserves `/data/workspace` and
+`/data/media` across deploys. Do not run multiple Render instances against one
+replica file. The API retries pending pushes before each periodic pull; an API
+request whose remote push fails returns an error even though its local transaction
+may be durable, so clients should re-read state before retrying a non-idempotent
+operation.
 
-This image does not start PostgreSQL or Redis inside the container. Use managed
-services or the existing Compose stack. Deploy one instance until migration
-concurrency and shared storage are handled by your infrastructure. The host must
-allow at least the image's 60-second health-check start period; migrations and
-three Python/Node processes need more startup time than a static site.
+Redis is deliberately not required for this single-instance Render topology.
+`REDIS_URL` is reserved for a future shared rate-limiter if horizontal HTTP
+scaling is introduced. Allow at least the image's 60-second health-check startup
+period because migrations, Turso bootstrap and the Python/Node services take
+longer than a static site.
 
 Build and smoke-test locally with Docker:
 
@@ -91,26 +101,26 @@ and signup through the public port. It also runs the backend and entrypoint test
 
 ## Backup and restore
 
-```bash
-# nightly (cron) — logical dump + audit export
-docker compose -f deploy/docker-compose.yml exec -T postgres \
-  pg_dump -U armx -Fc armx > backups/armx-$(date +%F).dump
-curl -s -H "Authorization: Bearer $ADMIN_TOKEN" https://armx.example/api/admin/audit?limit=200000 \
-  > backups/audit-$(date +%F).json
+Enable Turso backups/point-in-time recovery for the production database and keep
+a separately protected logical export. With the Turso CLI authenticated:
 
-# restore into a fresh database
-docker compose -f deploy/docker-compose.yml exec -T postgres \
-  pg_restore -U armx -d armx --clean --if-exists < backups/armx-2026-10-30.dump
+```bash
+mkdir -p backups
+turso db shell YOUR_DATABASE ".dump" > "backups/armx-$(date +%F).sql"
+curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "https://armx.example/api/admin/audit?limit=200000" \
+  > "backups/audit-$(date +%F).json"
 ```
 
-Generated project files live in the `appdata` volume (`/data/workspace`); they are
-reconstructible from the `generated_projects.files` column, so the database dump is
-sufficient for a full recovery. Media assets live in `/data/media` and should be
-copied with the same cadence.
+Restore the SQL into a **new** Turso database, point a staging deployment at it,
+and never test restoration against production. Generated project files are also
+stored in `generated_projects.files`; media in `/data/media` must be copied with
+the same cadence.
 
-**Restore drill (run quarterly):** restore into a scratch stack, sign in, verify
-`/api/admin/audit/verify` returns `ok: true`, open a conversation, generate a site,
-then destroy the scratch stack.
+**Restore drill (run quarterly):** restore to a scratch Turso database, use a fresh
+replica path, sign in, verify `/api/admin/audit/verify` returns `ok: true`, open a
+conversation, generate a site, test one provider route, then destroy the scratch
+deployment.
 
 ## Monitoring and alerting
 
@@ -118,6 +128,8 @@ then destroy the scratch stack.
 |---|---|---|
 | API liveness | `GET /api/health` | 2 consecutive failures → page |
 | Planner errors | audit `assistant.error` | > 5/min → warn (key or quota issue) |
+| Model pool | `GET /api/assistant/provider` | healthy routes = 0 or circuit-open spike → alert |
+| Turso sync | application logs containing `Turso sync failed` | any sustained failure → page; do not redeploy over pending writes |
 | Approval backlog | `GET /api/admin/overview → pending_approvals` | > 20 for 10 min → investigate |
 | Denied tool calls | audit `tool.denied` | spike → possible abuse or injection attempt |
 | Kill-switch state | audit `admin.kill_switch` | engaged → notify the owner immediately |

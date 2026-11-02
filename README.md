@@ -1,6 +1,6 @@
 # A.R.M.X AI
 
-A Claude-powered assistant platform shipped as a **web app** and a **native app**
+A multi-provider assistant platform shipped as a **web app** and a **native app**
 (Android + desktop + Wear OS companion), sharing one FastAPI backend, plus an
 auto-build-and-deploy pipeline that turns a sentence into a live site — with a
 human confirming every consequential step.
@@ -12,12 +12,12 @@ waits for a single-use approval bound to a hash of the exact action.
 
 ```
 Web app (Next.js)  ─┐
-Native app (Flutter)─┴─▶ FastAPI core ─┬─▶ LLM adapters (Claude | OpenAI | offline)
+Native app (Flutter)─┴─▶ FastAPI core ─┬─▶ weighted LLM router (Groq | compatible APIs | Anthropic)
                                        ├─▶ Security Gateway ─▶ Tool Registry (21 tools)
                                        ├─▶ Build & deploy pipeline (GitHub ▸ Vercel ▸ Turso)
                                        ├─▶ Integrations (Home Assistant, IMAP, search,
                                        │                 WhatsApp/Messenger, device link)
-                                       └─▶ Postgres/SQLite + Redis + hash-chained audit
+                                       └─▶ Turso embedded replica + hash-chained audit
 ```
 
 ---
@@ -27,22 +27,32 @@ Native app (Flutter)─┴─▶ FastAPI core ─┬─▶ LLM adapters (Claude 
 Requirements: Python 3.11+, Node 20+.
 
 ```bash
-cp .env.example .env         # optional: the defaults run offline
-make install                 # creates backend/.venv, installs Python + npm deps
+make install                 # creates backend/.env with offline development defaults
+make dev                     # api on :8000, web on :3000
+```
+
+The root `.env.example` is the Render production template. Local development uses
+`backend/.env.example`, copied automatically by `make install`.
+
+```bash
+# optional: inspect or edit local defaults
+$EDITOR backend/.env
+# then start both services
 make dev                     # api on :8000, web on :3000
 ```
 
 Then open <http://localhost:3000>, sign up, and talk to the assistant.
 
 That works immediately because a **deterministic offline planner** is used when no
-`ANTHROPIC_API_KEY` is set: it routes your request to real tools through the real
-gateway and the real UI, and every reply says so. Add a key and set
-`LLM_PROVIDER=claude` to hand planning to Claude — nothing else changes.
+live route is configured: it routes your request to real tools through the real
+gateway and the real UI, and every reply says so. Render defaults to Groq with
+`llama-3.3-70b-versatile`; additional compatible or Anthropic models can be
+weighted, tested, enabled and failed over from the admin panel.
 
 ### Check it end to end in 60 seconds
 
 ```bash
-make test                    # 68 backend tests (auth, gateway, devices, pipeline, hardening)
+make test                    # backend tests (auth, routing, gateway, devices, pipeline, hardening)
 
 # 1. Sign up through the UI, then in the chat: "build a landing page for a bakery in Dhaka"
 #    → the assistant drafts the site, runs the design lint, renders a preview
@@ -58,8 +68,16 @@ tokens to create real repositories and deployments.
 
 ### Create the first admin (never through public signup)
 
+For Render, choose one protected bootstrap in the root `.env.example`:
+
+1. Set `FIRST_ADMIN_EMAIL` and `FIRST_ADMIN_PASSWORD` for the first deploy, then
+   remove the password after login; or
+2. Set a random `INITIAL_SETUP_TOKEN`, open `/setup` once, then remove the token.
+
+Setup closes permanently when an administrator exists. Local operators can also run:
+
 ```bash
-make admin                                     # prompts for email + password
+make admin
 # or: cd backend && .venv/bin/python -m scripts.create_admin --email you@example.com
 ```
 
@@ -67,22 +85,23 @@ make admin                                     # prompts for email + password
 
 ```bash
 cp .env.example .env
-# edit .env: POSTGRES_PASSWORD, JWT_SECRET, WEB_ORIGIN, ANTHROPIC_API_KEY...
+# fill the blank Turso, JWT, LLM encryption, Groq and bootstrap values
 docker compose -f deploy/docker-compose.yml up -d --build
-docker compose -f deploy/docker-compose.yml exec api python -m scripts.create_admin
 ```
 
-Stack: nginx (rate limiting, security headers) → web + api → Postgres + Redis, plus
-a worker for approval expiry and scheduled automations. Migrations run on boot
+Stack: nginx (rate limiting and security headers) → web + API → Turso. Redis is
+not required. Housekeeping runs in the API lifecycle, and migrations run on boot
 (`AUTO_CREATE_TABLES=false`; the app refuses to start in production otherwise).
 
 ### Single-container deployment (root Dockerfile)
 
-For hosts such as Render that build from the repository root, use `Dockerfile`
-with build context `.`. It packages Next.js, FastAPI, the background worker and a
-rootless nginx proxy into one image. Only nginx is public; it listens on runtime
-`PORT` (default `10000`). The image runs as a non-root user and applies Alembic
-migrations before starting the services.
+For Render, apply `render.yaml` as a Blueprint (it creates the `/data` disk and
+health check), or create a Web Service from this repository using `Dockerfile`
+with build context `.`. Copy the root `.env.example` names into Render and fill
+the blank secret/Turso/Groq/bootstrap values. The image packages Next.js, FastAPI and
+a rootless nginx proxy; housekeeping runs inside the API process so the Turso
+embedded replica has one process owner. Only nginx is public on runtime `PORT`
+(default `10000`). Alembic migrations run before services start.
 
 ```bash
 docker build -t armx .
@@ -91,6 +110,12 @@ docker run --rm -p 10000:10000 \
   -v armx-data:/data \
   -e ENV=production \
   -e JWT_SECRET="$(openssl rand -base64 48)" \
+  -e LLM_SECRETS_KEY="YOUR_FERNET_KEY" \
+  -e TURSO_DATABASE_URL="libsql://YOUR_DATABASE.turso.io" \
+  -e TURSO_AUTH_TOKEN="YOUR_DATABASE_TOKEN" \
+  -e GROQ_API_KEY="YOUR_GROQ_KEY" \
+  -e FIRST_ADMIN_EMAIL="owner@example.com" \
+  -e FIRST_ADMIN_PASSWORD="A_LONG_RANDOM_INITIAL_PASSWORD" \
   -e WEB_ORIGIN=https://your-app.example \
   armx
 ```
@@ -99,13 +124,12 @@ For a public deployment, replace `WEB_ORIGIN` with the actual HTTPS origin and
 publish the mapped port through your host's TLS proxy. The example above is for
 running behind an existing HTTPS proxy, not for exposing plain HTTP to users.
 On Render, `RENDER_EXTERNAL_URL` supplies `WEB_ORIGIN` and `CORS_ORIGINS` when they
-are not explicitly set; you must still set `JWT_SECRET`. Set the health check path
-to `/api/health`. Use an external Postgres database and Redis for production, or
-attach a persistent disk at `/data` for a single-instance SQLite evaluation.
-Without persistent storage, SQLite data and uploaded media are lost on redeploy.
-See [operations](docs/operations.md#single-container-hosts-eg-render) for the full
-configuration and persistence requirements. The existing Compose stack is still
-the recommended multi-service deployment.
+are blank. Set the health check path to `/api/health` and mount a persistent disk
+at `/data`; Turso remains the authority, while the disk preserves the embedded
+replica and generated project artifacts across restarts. Redis is not required
+for this single-instance deployment. Keep exactly one Render instance attached
+to a replica path. See [operations](docs/operations.md#single-container-hosts-eg-render)
+for secret rotation, backups and restore checks.
 
 ---
 
@@ -113,7 +137,7 @@ the recommended multi-service deployment.
 
 | Capability | Default state | To go live |
 |---|---|---|
-| Chat / planning | offline planner (labelled) | `LLM_PROVIDER=claude` + `ANTHROPIC_API_KEY` |
+| Chat / planning | offline planner (labelled) | `GROQ_API_KEY` + `LLM_SECRETS_KEY`; add/fail over routes in Admin → Models |
 | Tool authorisation, approvals, audit | **fully live** | — |
 | Auth (argon2, rotating refresh, reset, Google OIDC) | **fully live** | SMTP for real reset mail; `GOOGLE_*` for OIDC |
 | Site generation + design lint + preview | **fully live** | — |
@@ -196,7 +220,6 @@ make install        # install backend + web dependencies
 make dev            # run api (:8000) and web (:3000) together
 make api            # api only
 make web            # web only
-make worker         # background worker
 make test           # backend test suite
 make lint           # ruff + tsc
 make migrate        # alembic upgrade head

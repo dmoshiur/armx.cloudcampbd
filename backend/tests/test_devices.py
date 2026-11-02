@@ -4,14 +4,20 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select
 
-from app.models import DeviceCommand, LinkedDevice, User
+from app.models import LinkedDevice, User
 
 
 async def _pair(client, headers, name: str = "Bedroom Pixel", password: str = "DevicePass1!") -> dict:
     req = await client.post(
         "/api/devices/pairing/request",
         headers=headers,
-        json={"name": name, "platform": "android", "capabilities": ["alarm", "app_launch", "state", "calls"]},
+        json={
+            "name": name,
+            "platform": "android",
+            "capabilities": [
+                "alarm", "app_launch", "state", "calls", "management", "screen_share", "voice", "usage"
+            ],
+        },
     )
     assert req.status_code == 201, req.text
     code = req.json()["pairing_code"]
@@ -146,14 +152,42 @@ async def test_unsupported_command_is_refused(db, client, vip_headers):
         await telecom.queue_command(db, user_id=user.id, device=device, command="record_call", payload={})
 
 
-async def test_screen_share_is_flagged_and_stoppable(client, vip_headers):
+async def test_screen_share_requires_device_and_system_consent_then_is_stoppable(client, vip_headers):
     paired = await _pair(client, vip_headers)
     device_id = paired["device"]["id"]
+    device_headers = {"X-Device-Id": device_id, "X-Device-Token": paired["device_token"]}
     start = await client.post(f"/api/devices/{device_id}/screen-share/start", headers=vip_headers)
     assert start.status_code == 200
-    assert start.json()["status"] == "active"
+    assert start.json()["status"] == "requested"
+    assert start.json()["active"] is False
+    session_id = start.json()["session_id"]
+
+    status = await client.get(f"/api/devices/{device_id}/screen-share", headers=vip_headers)
+    assert status.json()["status"] == "requested"
+    assert status.json()["active"] is False
+
+    hidden = await client.post(
+        f"/api/devices/{device_id}/consent-sessions/{session_id}/decision",
+        headers=device_headers,
+        json={"decision": "consent", "visible_indicator": False, "system_consent": True},
+    )
+    assert hidden.status_code == 400
+    no_system_consent = await client.post(
+        f"/api/devices/{device_id}/consent-sessions/{session_id}/decision",
+        headers=device_headers,
+        json={"decision": "consent", "visible_indicator": True, "system_consent": False},
+    )
+    assert no_system_consent.status_code == 400
+    consent = await client.post(
+        f"/api/devices/{device_id}/consent-sessions/{session_id}/decision",
+        headers=device_headers,
+        json={"decision": "consent", "visible_indicator": True, "system_consent": True},
+    )
+    assert consent.status_code == 200
     status = await client.get(f"/api/devices/{device_id}/screen-share", headers=vip_headers)
     assert status.json()["active"] is True
+    assert status.json()["visible_indicator"] is True
+
     stop = await client.post(f"/api/devices/{device_id}/screen-share/stop", headers=vip_headers)
     assert stop.status_code == 204
     status = await client.get(f"/api/devices/{device_id}/screen-share", headers=vip_headers)
