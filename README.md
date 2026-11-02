@@ -76,6 +76,37 @@ Stack: nginx (rate limiting, security headers) → web + api → Postgres + Redi
 a worker for approval expiry and scheduled automations. Migrations run on boot
 (`AUTO_CREATE_TABLES=false`; the app refuses to start in production otherwise).
 
+### Single-container deployment (root Dockerfile)
+
+For hosts such as Render that build from the repository root, use `Dockerfile`
+with build context `.`. It packages Next.js, FastAPI, the background worker and a
+rootless nginx proxy into one image. Only nginx is public; it listens on runtime
+`PORT` (default `10000`). The image runs as a non-root user and applies Alembic
+migrations before starting the services.
+
+```bash
+docker build -t armx .
+docker volume create armx-data
+docker run --rm -p 10000:10000 \
+  -v armx-data:/data \
+  -e ENV=production \
+  -e JWT_SECRET="$(openssl rand -base64 48)" \
+  -e WEB_ORIGIN=https://your-app.example \
+  armx
+```
+
+For a public deployment, replace `WEB_ORIGIN` with the actual HTTPS origin and
+publish the mapped port through your host's TLS proxy. The example above is for
+running behind an existing HTTPS proxy, not for exposing plain HTTP to users.
+On Render, `RENDER_EXTERNAL_URL` supplies `WEB_ORIGIN` and `CORS_ORIGINS` when they
+are not explicitly set; you must still set `JWT_SECRET`. Set the health check path
+to `/api/health`. Use an external Postgres database and Redis for production, or
+attach a persistent disk at `/data` for a single-instance SQLite evaluation.
+Without persistent storage, SQLite data and uploaded media are lost on redeploy.
+See [operations](docs/operations.md#single-container-hosts-eg-render) for the full
+configuration and persistence requirements. The existing Compose stack is still
+the recommended multi-service deployment.
+
 ---
 
 ## What is real, what needs a key

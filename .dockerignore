@@ -1,0 +1,28 @@
+# Keep credentials, local state and unrelated native sources out of the image.
+.git
+.github
+**/node_modules
+**/.next
+**/.venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.ruff_cache
+**/.env
+**/.env.*
+!**/.env.example
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/var
+**/*.tsbuildinfo
+**/npm-debug.log*
+backend/tests
+deploy/tests
+# These slash-containing patterns are rooted at the build context; do not use a
+# bare `app` pattern because that can also hide the FastAPI `backend/app` tree.
+app/**
+docs/**
+examples/**
+README.md
+Makefile
