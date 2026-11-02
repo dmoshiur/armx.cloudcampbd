@@ -12,7 +12,7 @@ from app.audit import audit
 from app.core.db import get_db
 from app.core.deps import AuthContext, get_auth_context, client_ip
 from app.harness import HarnessError, HarnessOutcome, resume_run, start_run
-from app.llm.factory import provider_status
+from app.llm.factory import provider_status_async
 from app.models import Approval, ChatRun, Conversation, Message, User
 from app.security import GatewayError, deny_approval
 
@@ -226,5 +226,5 @@ async def delete_conversation(
 
 
 @router.get("/provider")
-async def provider() -> dict[str, Any]:
-    return provider_status()
+async def provider(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    return await provider_status_async(db)

@@ -5,6 +5,7 @@ import 'core/api_client.dart';
 import 'core/app_state.dart';
 import 'core/theme.dart';
 import 'core/widgets/adaptive_scaffold.dart';
+import 'core/widgets/matrix_background.dart';
 import 'features/admin/admin_screen.dart';
 import 'features/alarms/alarms_screen.dart';
 import 'features/assistant/chat_screen.dart';
@@ -43,6 +44,7 @@ class ArmxApp extends StatelessWidget {
             title: 'A.R.M.X AI',
             debugShowCheckedModeBanner: false,
             theme: theme,
+            builder: (context, child) => MatrixBackground(child: child ?? const SizedBox.shrink()),
             home: auth.status == AuthStatus.signedIn
                 ? const _Home()
                 : LoginScreen(apiBase: api.baseUrl, onNeedsSignup: () {}),

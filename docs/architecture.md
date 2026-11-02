@@ -23,15 +23,15 @@
 │  api/devices   pairing · owner-password unlink · command queue       │
 │  api/admin     users · tool toggles · audit · kill-switch            │
 │                                                                      │
-│  harness ──▶ llm adapter (claude | openai | offline planner)         │
+│  harness ──▶ weighted model router (Groq/compatible/Anthropic/offline)│
 │         └──▶ security gateway ──▶ tool registry ──▶ integrations      │
 │                                    (21 plugins)      HA · IMAP ·      │
-│  builder (sandbox, lint, preview) · audit (hash chain) · worker       │
+│  builder (sandbox, lint, preview) · audit · in-process housekeeping  │
 │                                                      search · msg ·   │
 │                                                      github/vercel    │
 └──────────────────────────────────────────────────────────────────────┘
                                │
-                    Postgres (or SQLite) + Redis
+             Turso primary ⇄ local embedded replica
 ```
 
 ## Request lifecycle: one assistant turn
@@ -50,12 +50,14 @@
    argument swapping), executes once, and resumes the same run.
 7. The loop is bounded by `HARNESS_MAX_STEPS` (default 8) and every step is audited.
 
-## Why an adapter
+## Why adapters plus a router
 
 `LLMAdapter.complete(messages, tool_schemas) -> LLMResponse` is the only surface the
-harness knows. `ClaudeAdapter` (Anthropic Messages API, tool use, pooled keys from
-the same organisation), `OpenAIAdapter` and `MockAdapter` implement it. Swapping
-providers is one config value; the gateway, tools, approvals and audit are untouched.
+harness knows. `RoutingAdapter` loads encrypted provider/model records, orders each
+priority tier by configured weight, skips open circuits and fails over on errors.
+`OpenAIAdapter` covers Groq and other compatible APIs; `ClaudeAdapter` covers the
+Anthropic Messages protocol; `MockAdapter` is the labelled offline last resort.
+The gateway, tools, approvals and audit remain provider-independent.
 
 ## Build & deploy pipeline
 
@@ -82,16 +84,17 @@ blocks a deploy with error-level design violations.
 `users` · `sessions` · `password_reset_tokens` · `email_verification_tokens` ·
 `linked_devices` · `device_unlink_events` · `device_commands` · `screen_share_sessions` ·
 `tool_definitions` · `tool_user_overrides` · `approvals` · `audit_events` ·
-`integration_connections` (secret *references* only) · `generated_projects` ·
-`messaging_profiles` · `automation_rules` · `conversations` · `messages` · `chat_runs` ·
-`tickets` · `system_flags`.
+`integration_connections` (secret *references* only) · `llm_providers` (Fernet ciphertext) ·
+`llm_models` (weight, priority, circuit health) · `generated_projects` · `messaging_profiles` ·
+`automation_rules` · `conversations` · `messages` · `chat_runs` · `tickets` · `system_flags`.
 
 ## Scaling notes
 
-* Postgres + Redis in production; Redis backs cross-worker rate limiting and the
-  worker's scheduling.
-* Stateless API processes: sessions live in the database, not memory.
-* The harness is the only stateful loop and its state is persisted per run, so an
-  approval survives a restart or a load-balancer hop.
+* Render production runs one API process owning one embedded Turso replica; Redis
+  is not required. Pending local writes are retried before periodic pulls.
+* Sessions and harness state live in Turso, so approvals survive process restarts.
+* Horizontal scaling requires a separate replica path per instance plus a shared
+  rate limiter and explicit migration leadership; it is intentionally not enabled
+  by the single-instance Render template.
 * Deploy polling is bounded; a stuck Vercel deployment returns `TIMEOUT` instead of
   hanging a request.

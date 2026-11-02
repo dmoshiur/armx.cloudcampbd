@@ -39,12 +39,16 @@ class ClaudeAdapter:
         model: str | None = None,
         base_url: str | None = None,
         timeout: float | None = None,
+        provider_name: str = "claude",
+        max_tokens: int | None = None,
     ) -> None:
         keys = api_keys if api_keys is not None else settings.anthropic_key_pool
         self.api_keys = [k for k in keys if k]
         self.model = model or settings.ANTHROPIC_MODEL
         self.base_url = (base_url or settings.ANTHROPIC_BASE_URL).rstrip("/")
         self.timeout = timeout or settings.LLM_TIMEOUT_SECONDS
+        self.name = provider_name
+        self.max_tokens = max_tokens or settings.LLM_MAX_TOKENS
         self._cycle = itertools.cycle(range(max(1, len(self.api_keys))))
         self._lock = asyncio.Lock()
 
@@ -101,7 +105,7 @@ class ClaudeAdapter:
         system, msgs = self._split_system(messages)
         body: dict[str, Any] = {
             "model": self.model,
-            "max_tokens": settings.LLM_MAX_TOKENS,
+            "max_tokens": self.max_tokens,
             "messages": msgs,
         }
         if system:

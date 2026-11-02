@@ -25,7 +25,8 @@ from app.llm import (
     FinishReason,
     LLMMessage,
     ToolCall,
-    get_adapter,
+    get_routing_adapter,
+    provider_status_async,
     wrap_untrusted,
 )
 from app.models import ChatRun, Message, User
@@ -81,10 +82,8 @@ def _deser(raw: dict[str, Any]) -> LLMMessage:
     )
 
 
-def system_prompt(user: User) -> str:
-    from app.llm.factory import provider_status
-
-    status = provider_status()
+def system_prompt(user: User, status: dict[str, Any] | None = None) -> str:
+    status = status or {"provider": "mock", "model": "offline-rules-v1"}
     return (
         f"{TOOL_USE_RULES}\n"
         f"Today is {datetime.now(timezone.utc).date().isoformat()} (UTC).\n"
@@ -127,7 +126,8 @@ async def start_run(
     await db.commit()
 
     history = await load_history(db, conversation_id)
-    messages = [LLMMessage(role="system", content=system_prompt(user)), *history]
+    planner_status = await provider_status_async(db)
+    messages = [LLMMessage(role="system", content=system_prompt(user, planner_status)), *history]
 
     run = ChatRun(
         conversation_id=conversation_id,
@@ -232,15 +232,17 @@ async def drive(
     run: ChatRun,
     ip_address: str = "",
 ) -> HarnessOutcome:
-    adapter = get_adapter()
+    adapter = get_routing_adapter(db)
     schemas = registry.schemas()
     messages = [_deser(m) for m in json.loads(run.messages_json)]
     events: list[dict[str, Any]] = []
     budget = max(1, settings.HARNESS_MAX_STEPS - run.steps)
+    last_provider = adapter.name
 
     for _step in range(budget):
         run.steps += 1
         response = await adapter.complete(messages, schemas)
+        last_provider = response.provider or adapter.name
 
         if response.finish_reason is FinishReason.ERROR:
             await _fail_run(db, run, response.error)
@@ -258,10 +260,10 @@ async def drive(
                 error=response.error,
                 reply=(
                     "The AI provider is unavailable right now. "
-                    + ("" if adapter.name != "mock" else "This instance is using the offline planner.")
+                    + ("" if last_provider != "mock" else "This instance is using the offline planner.")
                 ),
                 steps=run.steps,
-                provider=adapter.name,
+                provider=last_provider,
                 tool_events=events,
             )
 
@@ -280,7 +282,7 @@ async def drive(
                 run_id=run.id,
                 tool_events=events,
                 steps=run.steps,
-                provider=adapter.name,
+                provider=last_provider,
             )
 
         # Record the assistant's tool-use turn exactly once.
@@ -363,7 +365,7 @@ async def drive(
                     },
                     tool_events=events,
                     steps=run.steps,
-                    provider=adapter.name,
+                    provider=last_provider,
                 )
 
             try:
@@ -424,7 +426,7 @@ async def drive(
         run_id=run.id,
         tool_events=events,
         steps=run.steps,
-        provider=adapter.name,
+        provider=last_provider,
     )
 
 

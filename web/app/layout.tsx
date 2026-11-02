@@ -8,7 +8,7 @@ import { Providers } from "./providers";
 
 export const metadata: Metadata = {
   title: "A.R.M.X AI",
-  description: "A Claude-powered assistant platform with a consent-first tool gateway.",
+  description: "A multi-provider assistant platform with a consent-first tool gateway.",
   applicationName: "A.R.M.X AI",
   robots: { index: false, follow: false },
 };
@@ -16,13 +16,14 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#0B1220",
+  themeColor: "#020904",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
       <body className="min-h-full font-sans">
+        <div className="matrix-background" aria-hidden="true" />
         <Providers>{children}</Providers>
       </body>
     </html>

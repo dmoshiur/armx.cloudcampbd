@@ -32,6 +32,49 @@ class ToolUserOverride(IDFormatMixin, Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
+class LLMProvider(IDFormatMixin, TimestampMixin, Base):
+    """An administrator-managed API endpoint. Credentials are encrypted."""
+
+    __tablename__ = "llm_providers"
+
+    name: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)  # openai_compatible | anthropic
+    base_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    api_key_encrypted: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    api_key_hint: Mapped[str] = mapped_column(String(32), default="not set", nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    source: Mapped[str] = mapped_column(String(24), default="admin", nullable=False)  # admin | environment
+    status: Mapped[str] = mapped_column(String(24), default="unknown", nullable=False)
+    last_error: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class LLMModelConfig(IDFormatMixin, TimestampMixin, Base):
+    """A routable model. Equal priority values form a weighted balance tier."""
+
+    __tablename__ = "llm_models"
+    __table_args__ = (UniqueConstraint("provider_id", "model_id", name="uq_llm_provider_model"),)
+
+    provider_id: Mapped[str] = mapped_column(
+        ForeignKey("llm_providers.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    model_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(160), default="", nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, default=100, nullable=False)
+    weight: Mapped[int] = mapped_column(Integer, default=100, nullable=False)
+    supports_tools: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    max_tokens: Mapped[int] = mapped_column(Integer, default=4096, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="unknown", nullable=False)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    circuit_open_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class ApprovalStatus(str, enum.Enum):
     PENDING = "pending"
     CONSUMED = "consumed"

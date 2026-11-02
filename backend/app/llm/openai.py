@@ -14,11 +14,19 @@ class OpenAIAdapter:
     name = "openai"
 
     def __init__(
-        self, *, api_key: str | None = None, model: str | None = None, base_url: str | None = None
+        self,
+        *,
+        api_key: str | None = None,
+        model: str | None = None,
+        base_url: str | None = None,
+        provider_name: str = "openai",
+        max_tokens: int | None = None,
     ) -> None:
-        self.api_key = api_key or settings.OPENAI_API_KEY
+        self.api_key = settings.OPENAI_API_KEY if api_key is None else api_key
         self.model = model or settings.OPENAI_MODEL
         self.base_url = (base_url or settings.OPENAI_BASE_URL).rstrip("/")
+        self.name = provider_name
+        self.max_tokens = max_tokens or settings.LLM_MAX_TOKENS
 
     @property
     def configured(self) -> bool:
@@ -63,7 +71,7 @@ class OpenAIAdapter:
         body: dict[str, Any] = {
             "model": self.model,
             "messages": self._translate(messages),
-            "max_tokens": settings.LLM_MAX_TOKENS,
+            "max_tokens": self.max_tokens,
         }
         if tool_schemas:
             body["tools"] = [

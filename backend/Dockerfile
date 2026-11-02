@@ -18,8 +18,8 @@ COPY . .
 
 # Never run the API as root.
 RUN useradd --create-home --uid 10001 armx \
-    && mkdir -p /app/var \
-    && chown -R armx:armx /app
+    && mkdir -p /app/var /data/workspace /data/media \
+    && chown -R armx:armx /app /data
 USER armx
 
 EXPOSE 8000

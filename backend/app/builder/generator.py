@@ -17,9 +17,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.builder.lint import LintReport, lint_project
 from app.core.config import settings
-from app.llm import LLMMessage, get_adapter
+from app.llm import LLMMessage, get_routing_adapter
 from app.llm.base import FinishReason
 
 MAX_FILES = 24
@@ -30,13 +32,13 @@ GENERATION_SYSTEM = """You are a senior front-end designer producing a single, p
 Return ONLY a JSON object of the shape {"files": {"index.html": "<html>", "styles.css": "...", "README.md": "..."}, "summary": "one sentence"}.
 Hard rules:
 - Tailwind CSS via <script src="https://cdn.tailwindcss.com"></script>, configured with these colours:
-  ink #0B1220, navy #101935, accent #5B8CFF, accent2 #8B5CF6, fog #F4F6FB, line #D7DCEA, muted #5B6475.
+  ink #020904, navy #06120a, accent #00FF41, accent2 #00B82E, fog #D7FFE1, line #174D24, muted #75A881.
 - One typeface (Inter), generous 1.5 line-height, clear heading jumps.
 - Dark theme by default, responsive at 600px and 1024px, content capped at 1200px and centred.
 - Real, specific copy for the user's business. No lorem ipsum, no placeholder images, no stock photos.
 - Accessible: lang attribute, viewport meta, one h1, alt text, visible focus states, 48px+ touch targets.
 - Include a contact section with a labelled form and an aria-live status region.
-- Never put accent (#5B8CFF) and accent2 (#8B5CF6) on the same element.
+- Never put accent (#00FF41) and accent2 (#00B82E) on the same element.
 - No external JS frameworks. Plain HTML/CSS/Tailwind only. Everything must render offline except the Tailwind CDN.
 """
 
@@ -154,7 +156,7 @@ def template_site(prompt: str, name: str) -> tuple[dict[str, str], str]:
     tailwind.config = {{
       theme: {{
         extend: {{
-          colors: {{ ink: '#0B1220', navy: '#101935', accent: '#5B8CFF', accent2: '#8B5CF6', fog: '#F4F6FB', line: '#D7DCEA', muted: '#5B6475' }},
+          colors: {{ ink: '#020904', navy: '#06120a', accent: '#00FF41', accent2: '#00B82E', fog: '#D7FFE1', line: '#174D24', muted: '#75A881' }},
           fontFamily: {{ sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'] }},
           maxWidth: {{ content: '1200px' }}
         }}
@@ -165,7 +167,7 @@ def template_site(prompt: str, name: str) -> tuple[dict[str, str], str]:
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     body {{ font-family: Inter, ui-sans-serif, system-ui, sans-serif; line-height: 1.5; }}
-    :focus-visible {{ outline: 2px solid #5B8CFF; outline-offset: 3px; border-radius: 8px; }}
+    :focus-visible {{ outline: 2px solid #00FF41; outline-offset: 3px; border-radius: 8px; }}
     @media (prefers-reduced-motion: reduce) {{ * {{ transition: none !important; animation: none !important; }} }}
     html {{ scroll-behavior: smooth; }}
   </style>
@@ -311,8 +313,8 @@ def _extract_json(text: str) -> dict[str, Any] | None:
         return None
 
 
-async def generate(prompt: str, name: str) -> GenerationResult:
-    adapter = get_adapter()
+async def generate(prompt: str, name: str, db: AsyncSession) -> GenerationResult:
+    adapter = get_routing_adapter(db)
     if adapter.name != "mock":
         response = await adapter.complete(
             [
@@ -329,7 +331,7 @@ async def generate(prompt: str, name: str) -> GenerationResult:
                     report = lint_project(files)
                     repairs = 0
                     if not report.ok:
-                        files, report = await _repair(files, report, prompt, name)
+                        files, report = await _repair(files, report, prompt, name, db)
                         repairs = 1
                     return GenerationResult(
                         files=files,
@@ -344,10 +346,10 @@ async def generate(prompt: str, name: str) -> GenerationResult:
 
 
 async def _repair(
-    files: dict[str, str], report: LintReport, prompt: str, name: str
+    files: dict[str, str], report: LintReport, prompt: str, name: str, db: AsyncSession
 ) -> tuple[dict[str, str], LintReport]:
     """One bounded repair round: feed violations back to the planner."""
-    adapter = get_adapter()
+    adapter = get_routing_adapter(db)
     problems = json.dumps(report.as_dict()["errors"][:12], indent=1)
     response = await adapter.complete(
         [

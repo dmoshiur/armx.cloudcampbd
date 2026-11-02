@@ -15,6 +15,7 @@ os.environ.update(
         "JWT_SECRET": "test-secret-that-is-long-enough-for-hs256-signing",
         "AUTO_CREATE_TABLES": "true",
         "LLM_PROVIDER": "mock",
+        "LLM_SECRETS_KEY": "JqYW-wqmgANnnAzqtxW3Fe0E-cBZEmJJgO43Vfzhz74=",
         "PIPELINE_MODE": "simulated",
         "MESSAGING_MODE": "simulated",
         "PROJECT_WORKSPACE": f"{TMPDIR}/workspace",

@@ -237,7 +237,7 @@ export default function AssistantPage() {
           <div>
             <h1 className="text-h1">Assistant</h1>
             <p className="mt-1 text-caption text-fgmuted">
-              Claude plans; the security gateway authorises. Medium- and high-risk actions pause for your approval.
+              Healthy models plan; the security gateway authorises. Medium- and high-risk actions pause for your approval.
             </p>
           </div>
           <Button variant="secondary" size="sm" className="lg:hidden" onClick={() => setHistoryOpen((v) => !v)}>

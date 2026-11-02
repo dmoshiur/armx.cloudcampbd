@@ -9,6 +9,7 @@ import {Badge, Button, Card, CardHeader, EmptyState, ErrorState, Input, LoadingB
 import { Switch } from "@/components/ui/switch";
 import { ConfirmActionDialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
+import { LlmRoutingAdmin } from "@/components/admin/llm-routing";
 
 interface AdminUser {
   id: string;
@@ -32,7 +33,7 @@ interface AdminDevice {
   last_seen_at: string | null;
 }
 
-const TABS = ["Overview", "Users", "Tools", "Audit", "Devices"] as const;
+const TABS = ["Overview", "Models", "Users", "Tools", "Audit", "Devices"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function AdminPage() {
@@ -174,6 +175,8 @@ export default function AdminPage() {
           )}
         </>
       )}
+
+      {tab === "Models" && <LlmRoutingAdmin />}
 
       {tab === "Users" && (
         <Card>

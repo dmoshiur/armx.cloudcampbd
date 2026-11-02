@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import mimetypes
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
@@ -19,8 +18,8 @@ from app.core.config import settings
 from app.core.db import get_db
 from app.core.deps import AuthContext, get_auth_context
 from app.integrations import health
-from app.llm.factory import provider_status
-from app.models import GeneratedProject, MessagingProfile, User
+from app.llm.factory import provider_status_async
+from app.models import GeneratedProject, MessagingProfile
 from app.registry import registry
 from app.security import kill_switch_engaged
 
@@ -42,7 +41,7 @@ async def health_check(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "app": settings.APP_NAME,
         "env": settings.ENV,
         "database": "ok" if db_ok else "error",
-        "planner": provider_status(),
+        "planner": await provider_status_async(db),
         "kill_switch": "on" if await kill_switch_engaged(db) else "off",
         "tools": len(registry.all()),
         "pipeline_mode": settings.PIPELINE_MODE,
@@ -77,7 +76,7 @@ async def integrations(ctx: AuthContext = Depends(get_auth_context), db: AsyncSe
     return {
         "integrations": health.snapshot(),
         "kill_switch": "on" if await kill_switch_engaged(db) else "off",
-        "planner": provider_status(),
+        "planner": await provider_status_async(db),
     }
 
 
@@ -301,7 +300,7 @@ async def delete_profile(
 # web-facing config
 # --------------------------------------------------------------------------
 @router.get("/config")
-async def public_config() -> JSONResponse:
+async def public_config(db: AsyncSession = Depends(get_db)) -> JSONResponse:
     """Non-secret capability flags so the UI can be honest about what works."""
     return JSONResponse(
         {
@@ -316,6 +315,6 @@ async def public_config() -> JSONResponse:
                 "pipeline_mode": settings.PIPELINE_MODE,
                 "messaging_mode": settings.MESSAGING_MODE,
             },
-            "planner": provider_status(),
+            "planner": await provider_status_async(db),
         }
     )

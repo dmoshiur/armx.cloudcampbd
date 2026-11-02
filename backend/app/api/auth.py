@@ -6,19 +6,19 @@ detection).
 """
 from __future__ import annotations
 
-import secrets
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import audit
+from app.core.bootstrap import setup_state
 from app.core.config import settings
 from app.core.db import as_utc, get_db
 from app.core.deps import AuthContext, get_auth_context, get_current_user, client_ip, user_agent
@@ -106,6 +106,8 @@ async def signup(
     payload: SignupRequest, request: Request, db: AsyncSession = Depends(get_db)
 ) -> TokenPair:
     _check_auth_rate_limit(request, "signup", limit=5)
+    if (await setup_state(db))["needs_setup"]:
+        raise HTTPException(status_code=503, detail="Complete protected platform setup before creating users")
     email = payload.email.lower().strip()
     existing = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
     if existing is not None:
