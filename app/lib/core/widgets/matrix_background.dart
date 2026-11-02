@@ -86,7 +86,7 @@ class _MatrixPainter extends CustomPainter {
           text: TextSpan(
             text: _glyphs[(column + row * 3) % _glyphs.length],
             style: TextStyle(
-              color: ArmxColors.accent.withOpacity(opacity),
+              color: ArmxColors.accent.withValues(alpha: opacity),
               fontFamily: 'monospace',
               fontSize: 13,
             ),

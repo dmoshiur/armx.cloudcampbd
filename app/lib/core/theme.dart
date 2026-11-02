@@ -60,7 +60,7 @@ class ArmxTheme {
         bodyMedium: TextStyle(fontSize: 15, height: 1.5, color: text),
         bodySmall: TextStyle(fontSize: 13, height: 1.45, color: textMuted),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: surface,
         elevation: 0,
         margin: EdgeInsets.zero,

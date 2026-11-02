@@ -40,19 +40,23 @@ class SettingsScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const ArmxSectionHeader(title: 'Appearance'),
-              RadioListTile<String>(
-                value: 'dark',
+              RadioGroup<String>(
                 groupValue: auth.themeMode,
                 onChanged: (value) => auth.setTheme(value ?? 'dark'),
-                title: const Text('Dark (default)'),
-                contentPadding: EdgeInsets.zero,
-              ),
-              RadioListTile<String>(
-                value: 'light',
-                groupValue: auth.themeMode,
-                onChanged: (value) => auth.setTheme(value ?? 'dark'),
-                title: const Text('Light'),
-                contentPadding: EdgeInsets.zero,
+                child: const Column(
+                  children: [
+                    RadioListTile<String>(
+                      value: 'dark',
+                      title: Text('Dark (default)'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    RadioListTile<String>(
+                      value: 'light',
+                      title: Text('Light'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ],
+                ),
               ),
             ],
           ),

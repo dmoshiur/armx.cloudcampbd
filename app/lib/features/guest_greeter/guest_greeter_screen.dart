@@ -59,14 +59,20 @@ class _GuestGreeterScreenState extends State<GuestGreeterScreen> {
                 description:
                     'A short, generic greeting spoken on a linked device. No camera, no face check, no identification of unknown visitors.',
               ),
-              for (final entry in _options.entries)
-                RadioListTile<String>(
-                  value: entry.key,
-                  groupValue: _greeting,
-                  onChanged: (value) => setState(() => _greeting = value ?? 'arrival'),
-                  title: Text(entry.value),
-                  contentPadding: EdgeInsets.zero,
+              RadioGroup<String>(
+                groupValue: _greeting,
+                onChanged: (value) => setState(() => _greeting = value ?? 'arrival'),
+                child: Column(
+                  children: [
+                    for (final entry in _options.entries)
+                      RadioListTile<String>(
+                        value: entry.key,
+                        title: Text(entry.value),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                  ],
                 ),
+              ),
               const SizedBox(height: 8),
               ElevatedButton(
                 onPressed: _busy ? null : _greet,
