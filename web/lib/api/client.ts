@@ -16,11 +16,13 @@ export class ApiError extends Error {
   status: number;
   code?: string;
   detail?: unknown;
-  constructor(message: string, status: number, code?: string, detail?: unknown) {
+  requestId?: string;
+  constructor(message: string, status: number, code?: string, detail?: unknown, requestId?: string) {
     super(message);
     this.status = status;
     this.code = code;
     this.detail = detail;
+    this.requestId = requestId;
   }
 }
 
@@ -116,17 +118,29 @@ export async function request<T>(
   }
 
   if (!res.ok) {
-    const code =
-      payload && typeof payload === "object" && "code" in payload ? String((payload as { code: string }).code) : undefined;
-    throw new ApiError(messageFrom(payload, res.statusText), res.status, code, payload);
+    const top = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+    const nested = top.detail && typeof top.detail === "object" ? (top.detail as Record<string, unknown>) : {};
+    const code = top.code ?? nested.code;
+    const requestId = res.headers.get("X-Request-ID") ?? nested.request_id ?? top.request_id;
+    throw new ApiError(
+      messageFrom(payload, res.statusText || "Request failed"),
+      res.status,
+      code ? String(code) : undefined,
+      payload,
+      requestId ? String(requestId) : undefined,
+    );
   }
   return payload as T;
 }
 
 export const api = {
   get: <T>(path: string) => request<T>(path),
-  post: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) }),
+  post: <T>(path: string, body?: unknown, options: RequestInit = {}) =>
+    request<T>(path, {
+      ...options,
+      method: "POST",
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }),
   put: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "PUT", body: body === undefined ? undefined : JSON.stringify(body) }),
   patch: <T>(path: string, body?: unknown) =>

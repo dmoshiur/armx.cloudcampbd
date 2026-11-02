@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { CMatrixBackdrop } from "@/components/effects/cmatrix-backdrop";
 import { Providers } from "./providers";
 
 // The platform ships without a font CDN dependency: Inter is used when the
@@ -23,7 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
       <body className="min-h-full font-sans">
-        <div className="matrix-background" aria-hidden="true" />
+        <CMatrixBackdrop />
         <Providers>{children}</Providers>
       </body>
     </html>

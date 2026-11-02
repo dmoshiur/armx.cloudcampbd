@@ -7,7 +7,7 @@ from app.core.config import settings
 from app.core.net import UnsafeProviderURL, validate_provider_url
 from app.core.secrets import decrypt_secret, encrypt_secret, secret_hint
 from app.llm.base import FinishReason, LLMMessage, LLMResponse
-from app.llm.router import RoutingAdapter, seed_environment_providers
+from app.llm.router import RoutingAdapter, provider_status_async, seed_environment_providers
 from app.models import AuditEvent, LLMModelConfig, LLMProvider, User
 
 
@@ -79,6 +79,10 @@ async def test_environment_groq_route_is_encrypted_and_tracks_model_changes(db, 
     await seed_environment_providers(db)
 
     provider = (await db.execute(select(LLMProvider).where(LLMProvider.name == "groq"))).scalar_one()
+    status = await provider_status_async(db)
+    assert status["live"] is True
+    assert status["ready"] is False
+    assert status["readiness"] == "unverified"
     assert provider.source == "environment"
     assert "gsk_environment-secret" not in provider.api_key_encrypted
     assert decrypt_secret(provider.api_key_encrypted) == "gsk_environment-secret"
@@ -208,3 +212,7 @@ async def test_router_fails_over_and_opens_circuit(db, monkeypatch):
     await db.refresh(primary_model)
     assert primary_model.status == "circuit_open"
     assert primary_model.circuit_open_until is not None
+    status = await provider_status_async(db)
+    assert status["ready"] is True
+    assert status["healthy_models"] == 1
+    assert status["readiness"] == "verified"

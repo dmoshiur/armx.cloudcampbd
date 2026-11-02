@@ -39,6 +39,7 @@ export interface Approval {
 
 export interface ChatResponse {
   status: "complete" | "awaiting_approval" | "rejected" | "error";
+  request_id?: string;
   reply: string;
   run_id: string;
   conversation_id: string;
@@ -112,7 +113,18 @@ export interface HealthStatus {
   app: string;
   env: string;
   database: string;
-  planner: { provider: string; model: string; live: boolean; key_pool_size: number; configured_provider: string };
+  planner: {
+    provider: string;
+    model: string;
+    live: boolean;
+    ready: boolean;
+    readiness: "verified" | "unverified" | "degraded" | "offline";
+    enabled_models: number;
+    healthy_models: number;
+    unverified_models: number;
+    key_pool_size: number;
+    configured_provider: string;
+  };
   kill_switch: string;
   tools: number;
   pipeline_mode: string;

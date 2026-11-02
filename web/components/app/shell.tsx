@@ -73,22 +73,33 @@ function KillSwitchBanner() {
 
   if (!data) return null;
   const engaged = data.kill_switch === "on";
+  const plannerTone = data.planner.ready
+    ? "success"
+    : data.planner.readiness === "degraded"
+      ? "danger"
+      : "warning";
+  const plannerLabel = data.planner.ready
+    ? "AI route verified"
+    : data.planner.readiness === "unverified"
+      ? "AI route configured — awaiting live verification"
+      : data.planner.readiness === "degraded"
+        ? "AI route degraded — offline fallback available"
+        : "Offline planner active";
 
   return (
     <div
       className={clsx(
-        "flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-2 text-caption",
-        engaged ? "border-danger/40 bg-danger/10 text-danger" : "border-edge bg-surface text-fgmuted",
+        "sticky top-0 z-50 flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-2 text-caption backdrop-blur-xl",
+        engaged ? "border-danger/40 bg-danger/10 text-danger" : "border-edge/80 bg-surface/80 text-fgmuted",
       )}
     >
       {engaged ? (
         <span className="font-semibold">Kill-switch is engaged — every integration and tool is halted.</span>
       ) : (
-        <StatusDot tone="success" label="All systems operational" />
+        <StatusDot tone={plannerTone} label={plannerLabel} />
       )}
       <span className="hidden sm:inline">
-        Planner: <span className="text-fg">{data.planner.provider}</span>
-        {!data.planner.live && " (offline planner — set ANTHROPIC_API_KEY for live Claude)"}
+        Route: <span className="text-fg">{data.planner.provider} / {data.planner.model}</span>
       </span>
       <span className="ml-auto hidden md:inline">
         Pipeline: {data.pipeline_mode}
@@ -109,14 +120,18 @@ export function AppShell({ children }: { children: ReactNode }) {
     <ToastProvider>
       <div className="min-h-screen">
         <KillSwitchBanner />
-        <div className="mx-auto flex max-w-content">
+        <div className="mx-auto flex max-w-[1800px]">
           {/* Sidebar: expanded */}
-          <aside className="sticky top-0 hidden h-[calc(100vh-41px)] w-[264px] shrink-0 flex-col border-r border-edge px-3 py-5 lg:flex">
-            <Link href="/" className="mb-6 flex items-center gap-2.5 px-2">
-              <span className="grid h-9 w-9 place-items-center rounded-md bg-accent font-bold text-ink" aria-hidden="true">
+          <aside className="sticky top-[41px] hidden h-[calc(100vh-41px)] w-[276px] shrink-0 flex-col border-r border-edge/70 bg-surface/45 px-4 py-6 backdrop-blur-xl lg:flex">
+            <Link href="/" className="mb-8 flex items-center gap-3 px-1">
+              <span className="relative grid h-11 w-11 place-items-center rounded-lg border border-accent/40 bg-gradient-to-br from-accent to-emerald-500 font-black text-ink shadow-lg shadow-accent/20" aria-hidden="true">
                 A
+                <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-surface bg-accent" />
               </span>
-              <span className="text-h3 tracking-tight">A.R.M.X AI</span>
+              <span>
+                <span className="block text-h3 font-bold tracking-tight">A.R.M.X AI</span>
+                <span className="block text-[9px] font-semibold uppercase tracking-[0.22em] text-accent/70">Control intelligence</span>
+              </span>
             </Link>
             <nav aria-label="Primary" className="flex flex-1 flex-col gap-1">
               {items.map((item) => {
@@ -127,8 +142,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                     href={item.href}
                     aria-current={active ? "page" : undefined}
                     className={clsx(
-                      "flex min-h-touch items-center gap-3 rounded-md px-3 text-body transition",
-                      active ? "bg-accent/10 font-semibold text-accent" : "text-fgmuted hover:bg-white/5 hover:text-fg",
+                      "group flex min-h-touch items-center gap-3 rounded-md border px-3 text-body transition",
+                      active
+                        ? "border-accent/20 bg-gradient-to-r from-accent/15 to-accent/5 font-semibold text-accent shadow-sm shadow-accent/5"
+                        : "border-transparent text-fgmuted hover:border-edge/70 hover:bg-white/5 hover:text-fg",
                     )}
                   >
                     <Icon path={item.icon} />
@@ -175,7 +192,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </aside>
 
           {/* Content */}
-          <div className="flex min-h-[calc(100vh-41px)] w-full min-w-0 flex-col">
+          <div className="flex min-h-[calc(100vh-41px)] w-full min-w-0 flex-col bg-gradient-to-b from-transparent via-bg/15 to-bg/30">
             <div className="flex items-center justify-between gap-3 border-b border-edge px-4 py-2 md:hidden">
               <Link href="/" className="flex items-center gap-2">
                 <span className="grid h-8 w-8 place-items-center rounded-md bg-accent text-caption font-bold text-ink">A</span>
@@ -186,10 +203,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <ThemeToggle />
               </div>
             </div>
-            <div className="hidden justify-end gap-2 px-6 pt-4 md:flex">
+            <div className="hidden justify-end gap-2 px-6 pt-3 md:flex">
               <ThemeToggle />
             </div>
-            <main className="flex-1 px-4 pb-24 pt-4 md:px-6 md:pb-8">{children}</main>
+            <main className="flex-1 px-3 pb-24 pt-3 sm:px-4 md:px-6 md:pb-8 xl:px-8">{children}</main>
           </div>
         </div>
 

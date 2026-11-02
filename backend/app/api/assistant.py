@@ -1,6 +1,9 @@
 """Assistant: conversations, the harness, approvals and resumes."""
+
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -9,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import audit
+from app.core.config import settings
 from app.core.db import get_db
 from app.core.deps import AuthContext, get_auth_context, client_ip
 from app.harness import HarnessError, HarnessOutcome, resume_run, start_run
@@ -17,6 +21,7 @@ from app.models import Approval, ChatRun, Conversation, Message, User
 from app.security import GatewayError, deny_approval
 
 router = APIRouter(prefix="/assistant", tags=["assistant"])
+log = logging.getLogger(__name__)
 
 
 class ChatRequest(BaseModel):
@@ -29,9 +34,12 @@ class ApproveRequest(BaseModel):
     decision: str = Field(default="approve", pattern="^(approve|reject)$")
 
 
-def _outcome(outcome: HarnessOutcome, conversation_id: str) -> dict[str, Any]:
+def _outcome(
+    outcome: HarnessOutcome, conversation_id: str, *, request_id: str = ""
+) -> dict[str, Any]:
     return {
         "status": outcome.status,
+        "request_id": request_id,
         "reply": outcome.reply,
         "run_id": outcome.run_id,
         "conversation_id": conversation_id,
@@ -43,7 +51,9 @@ def _outcome(outcome: HarnessOutcome, conversation_id: str) -> dict[str, Any]:
     }
 
 
-async def _conversation(db: AsyncSession, user: User, conversation_id: str | None) -> Conversation:
+async def _conversation(
+    db: AsyncSession, user: User, conversation_id: str | None
+) -> Conversation:
     if conversation_id:
         convo = await db.get(Conversation, conversation_id)
         if convo is None or convo.user_id != user.id:
@@ -68,29 +78,81 @@ async def chat(
         convo.title = payload.message.strip()[:60]
         await db.commit()
 
+    request_id = getattr(request.state, "request_id", "")
     try:
-        outcome = await start_run(
-            db,
-            user=ctx.user,
-            session_id=ctx.session.id,
-            conversation_id=convo.id,
-            user_text=payload.message,
-            ip_address=client_ip(request),
+        outcome = await asyncio.wait_for(
+            start_run(
+                db,
+                user=ctx.user,
+                session_id=ctx.session.id,
+                conversation_id=convo.id,
+                user_text=payload.message,
+                ip_address=client_ip(request),
+            ),
+            timeout=settings.ASSISTANT_REQUEST_TIMEOUT_SECONDS,
         )
+    except TimeoutError as exc:
+        await db.rollback()
+        running = (
+            await db.execute(
+                select(ChatRun)
+                .where(ChatRun.conversation_id == convo.id, ChatRun.status == "running")
+                .order_by(ChatRun.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if running is not None:
+            running.status = "error"
+            await db.commit()
+        log.error(
+            "Assistant request %s exceeded its %.1fs deadline",
+            request_id,
+            settings.ASSISTANT_REQUEST_TIMEOUT_SECONDS,
+        )
+        raise HTTPException(
+            status_code=504,
+            detail={
+                "code": "assistant_timeout",
+                "detail": (
+                    "The assistant pipeline did not finish in time. Check the audit log before "
+                    "retrying any tool command."
+                ),
+                "request_id": request_id,
+            },
+        ) from exc
     except GatewayError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.payload()) from exc
     except HarnessError as exc:
-        raise HTTPException(status_code=400, detail={"code": exc.code, "detail": exc.message}) from exc
+        raise HTTPException(
+            status_code=400, detail={"code": exc.code, "detail": exc.message}
+        ) from exc
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        await db.rollback()
+        log.exception("Assistant request %s failed", request_id)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "assistant_unavailable",
+                "detail": "The assistant could not complete this request.",
+                "request_id": request_id,
+            },
+        ) from exc
 
     await audit(
         db,
         action="assistant.chat",
         actor=ctx.user,
         status=outcome.status,
-        detail={"conversation_id": convo.id, "steps": outcome.steps, "provider": outcome.provider},
+        detail={
+            "conversation_id": convo.id,
+            "steps": outcome.steps,
+            "provider": outcome.provider,
+        },
         ip_address=client_ip(request),
     )
-    return _outcome(outcome, convo.id)
+    return _outcome(outcome, convo.id, request_id=request_id)
 
 
 @router.post("/runs/{run_id}/approve")
@@ -130,7 +192,9 @@ async def approve_run(
     except GatewayError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.payload()) from exc
     except HarnessError as exc:
-        raise HTTPException(status_code=400, detail={"code": exc.code, "detail": exc.message}) from exc
+        raise HTTPException(
+            status_code=400, detail={"code": exc.code, "detail": exc.message}
+        ) from exc
 
     await audit(
         db,
@@ -140,7 +204,11 @@ async def approve_run(
         detail={"run_id": run_id, "approval_id": payload.approval_id},
         ip_address=client_ip(request),
     )
-    return _outcome(outcome, run.conversation_id)
+    return _outcome(
+        outcome,
+        run.conversation_id,
+        request_id=getattr(request.state, "request_id", ""),
+    )
 
 
 @router.get("/approvals")
@@ -148,13 +216,17 @@ async def pending_approvals(
     ctx: AuthContext = Depends(get_auth_context), db: AsyncSession = Depends(get_db)
 ) -> list[dict[str, Any]]:
     rows = (
-        await db.execute(
-            select(Approval)
-            .where(Approval.user_id == ctx.user.id, Approval.status == "pending")
-            .order_by(Approval.created_at.desc())
-            .limit(20)
+        (
+            await db.execute(
+                select(Approval)
+                .where(Approval.user_id == ctx.user.id, Approval.status == "pending")
+                .order_by(Approval.created_at.desc())
+                .limit(20)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [
         {
             "id": a.id,
@@ -174,15 +246,24 @@ async def list_conversations(
     ctx: AuthContext = Depends(get_auth_context), db: AsyncSession = Depends(get_db)
 ) -> list[dict[str, Any]]:
     rows = (
-        await db.execute(
-            select(Conversation)
-            .where(Conversation.user_id == ctx.user.id)
-            .order_by(Conversation.updated_at.desc())
-            .limit(60)
+        (
+            await db.execute(
+                select(Conversation)
+                .where(Conversation.user_id == ctx.user.id)
+                .order_by(Conversation.updated_at.desc())
+                .limit(60)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [
-        {"id": c.id, "title": c.title, "updated_at": c.updated_at.isoformat(), "created_at": c.created_at.isoformat()}
+        {
+            "id": c.id,
+            "title": c.title,
+            "updated_at": c.updated_at.isoformat(),
+            "created_at": c.created_at.isoformat(),
+        }
         for c in rows
     ]
 
@@ -197,15 +278,26 @@ async def get_conversation(
     if convo is None or convo.user_id != ctx.user.id:
         raise HTTPException(status_code=404, detail="Conversation not found")
     rows = (
-        await db.execute(
-            select(Message).where(Message.conversation_id == convo.id).order_by(Message.created_at.asc())
+        (
+            await db.execute(
+                select(Message)
+                .where(Message.conversation_id == convo.id)
+                .order_by(Message.created_at.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return {
         "id": convo.id,
         "title": convo.title,
         "messages": [
-            {"id": m.id, "role": m.role, "content": m.content, "created_at": m.created_at.isoformat()}
+            {
+                "id": m.id,
+                "role": m.role,
+                "content": m.content,
+                "created_at": m.created_at.isoformat(),
+            }
             for m in rows
         ],
     }

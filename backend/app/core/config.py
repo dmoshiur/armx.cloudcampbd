@@ -3,6 +3,7 @@
 Everything secret comes from the environment. The process refuses to boot in
 production when a required secret is missing or still a placeholder value.
 """
+
 from __future__ import annotations
 
 import base64
@@ -85,7 +86,11 @@ class Settings(BaseSettings):
     LLM_ROUTING_STRATEGY: Literal["balanced", "priority"] = "balanced"
     LLM_SECRETS_KEY: str = ""
     LLM_MAX_TOKENS: int = 4096
-    LLM_TIMEOUT_SECONDS: float = Field(default=60.0, ge=3.0, le=300.0)
+    # Bound both one provider attempt and the full failover path so an
+    # interactive chat can never wait through N sequential HTTP timeouts.
+    LLM_TIMEOUT_SECONDS: float = Field(default=25.0, ge=3.0, le=300.0)
+    LLM_ROUTE_TIMEOUT_SECONDS: float = Field(default=45.0, ge=5.0, le=300.0)
+    ASSISTANT_REQUEST_TIMEOUT_SECONDS: float = Field(default=50.0, ge=10.0, le=330.0)
     LLM_FAILURE_THRESHOLD: int = Field(default=3, ge=1, le=20)
     LLM_CIRCUIT_COOLDOWN_SECONDS: int = Field(default=60, ge=10, le=3600)
     HARNESS_MAX_STEPS: int = 8
@@ -144,8 +149,12 @@ class Settings(BaseSettings):
     PROJECT_WORKSPACE: str = "./var/workspace"
 
     # --- messaging ---------------------------------------------------------
-    WHATSAPP_TOKEN: str = ""
+    WHATSAPP_TOKEN: str = ""  # Meta Graph API access token (outbound)
     WHATSAPP_PHONE_ID: str = ""
+    # Inbound webhook secrets are intentionally separate from the access token.
+    WHATSAPP_VERIFY_TOKEN: str = ""
+    WHATSAPP_APP_SECRET: str = ""
+    WHATSAPP_WEBHOOK_MAX_BYTES: int = Field(default=1_048_576, ge=1024, le=8_388_608)
     MESSENGER_TOKEN: str = ""
     MESSENGER_PAGE_ID: str = ""
     MESSAGING_MODE: Literal["live", "simulated"] = "simulated"
@@ -202,11 +211,19 @@ class Settings(BaseSettings):
 
     @property
     def allowed_entities(self) -> set[str]:
-        return {e.strip() for e in self.HOME_ASSISTANT_ALLOWED_ENTITIES.split(",") if e.strip()}
+        return {
+            e.strip()
+            for e in self.HOME_ASSISTANT_ALLOWED_ENTITIES.split(",")
+            if e.strip()
+        }
 
     @property
     def github_target_allowlist(self) -> list[str]:
-        return [t.strip().lower() for t in self.GITHUB_ALLOWED_TARGETS.split(",") if t.strip()]
+        return [
+            t.strip().lower()
+            for t in self.GITHUB_ALLOWED_TARGETS.split(",")
+            if t.strip()
+        ]
 
     @field_validator("DATABASE_URL")
     @classmethod
@@ -221,13 +238,19 @@ class Settings(BaseSettings):
     def _production_guards(self) -> "Settings":
         """Reject partial integrations and unsafe production configuration."""
         if bool(self.TURSO_DATABASE_URL) != bool(self.TURSO_AUTH_TOKEN):
-            raise RuntimeError("Set both TURSO_DATABASE_URL and TURSO_AUTH_TOKEN, or neither")
+            raise RuntimeError(
+                "Set both TURSO_DATABASE_URL and TURSO_AUTH_TOKEN, or neither"
+            )
         if self.TURSO_DATABASE_URL and not self.TURSO_DATABASE_URL.startswith(
             ("https://", "libsql://", "turso://")
         ):
-            raise RuntimeError("TURSO_DATABASE_URL must use https://, libsql://, or turso://")
+            raise RuntimeError(
+                "TURSO_DATABASE_URL must use https://, libsql://, or turso://"
+            )
         if bool(self.FIRST_ADMIN_EMAIL) != bool(self.FIRST_ADMIN_PASSWORD):
-            raise RuntimeError("Set both FIRST_ADMIN_EMAIL and FIRST_ADMIN_PASSWORD, or neither")
+            raise RuntimeError(
+                "Set both FIRST_ADMIN_EMAIL and FIRST_ADMIN_PASSWORD, or neither"
+            )
         if self.FIRST_ADMIN_PASSWORD:
             password = self.FIRST_ADMIN_PASSWORD
             if len(password) < 10 or password.lower() == password or password.isalnum():
@@ -240,7 +263,9 @@ class Settings(BaseSettings):
             try:
                 decoded = base64.urlsafe_b64decode(self.LLM_SECRETS_KEY.encode("ascii"))
             except Exception as exc:
-                raise RuntimeError("LLM_SECRETS_KEY must be a URL-safe base64 key") from exc
+                raise RuntimeError(
+                    "LLM_SECRETS_KEY must be a URL-safe base64 key"
+                ) from exc
             if len(decoded) != 32:
                 raise RuntimeError("LLM_SECRETS_KEY must decode to exactly 32 bytes")
 
@@ -253,9 +278,13 @@ class Settings(BaseSettings):
             "LLM_SECRETS_KEY": self.LLM_SECRETS_KEY,
         }
         if self.REQUIRE_TURSO_IN_PRODUCTION and not self.turso_enabled:
-            raise RuntimeError("Turso is required: set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN")
+            raise RuntimeError(
+                "Turso is required: set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN"
+            )
         if self.AUTO_CREATE_TABLES:
-            raise RuntimeError("AUTO_CREATE_TABLES must be false in production; run alembic upgrade head")
+            raise RuntimeError(
+                "AUTO_CREATE_TABLES must be false in production; run alembic upgrade head"
+            )
         if self.DEBUG:
             raise RuntimeError("DEBUG must be false in production")
 
@@ -265,10 +294,13 @@ class Settings(BaseSettings):
                 problems.append(name)
         if problems:
             raise RuntimeError(
-                "Refusing to boot in production with missing/placeholder secrets: " + ", ".join(problems)
+                "Refusing to boot in production with missing/placeholder secrets: "
+                + ", ".join(problems)
             )
         if len(self.JWT_SECRET) < 32:
-            raise RuntimeError("JWT_SECRET must be at least 32 characters in production")
+            raise RuntimeError(
+                "JWT_SECRET must be at least 32 characters in production"
+            )
         if not self.WEB_ORIGIN.startswith("https://"):
             raise RuntimeError("WEB_ORIGIN must be https in production")
         if self.turso_enabled and not Path(self.TURSO_REPLICA_PATH).is_absolute():

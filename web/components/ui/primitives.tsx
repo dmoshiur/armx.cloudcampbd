@@ -9,8 +9,8 @@ type Variant = "primary" | "secondary" | "ghost" | "danger";
 type Size = "sm" | "md" | "lg";
 
 const variants: Record<Variant, string> = {
-  primary: "bg-accent text-ink hover:brightness-110 active:brightness-95",
-  secondary: "border border-edge bg-surface text-fg hover:bg-white/5",
+  primary: "bg-gradient-to-br from-accent to-emerald-400 text-ink shadow-lg shadow-accent/10 hover:brightness-110 active:brightness-95",
+  secondary: "border border-edge/80 bg-surface/80 text-fg shadow-sm backdrop-blur hover:border-accent/30 hover:bg-white/5",
   ghost: "text-fg hover:bg-white/5",
   danger: "border border-danger/40 text-danger hover:bg-danger/10",
 };
@@ -67,7 +67,7 @@ export function Card({
   as?: "div" | "section" | "article";
 }) {
   return (
-    <Tag className={clsx("rounded-lg border border-edge bg-surface", className)}>{children}</Tag>
+    <Tag className={clsx("rounded-lg border border-edge/80 bg-surface/90 shadow-xl shadow-black/10 backdrop-blur-xl", className)}>{children}</Tag>
   );
 }
 

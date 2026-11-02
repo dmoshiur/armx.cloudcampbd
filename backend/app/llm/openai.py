@@ -1,4 +1,5 @@
 """OpenAI adapter - demonstrates the swap-without-refactor promise of the interface."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -37,7 +38,13 @@ class OpenAIAdapter:
         out: list[dict[str, Any]] = []
         for m in messages:
             if m.role == "tool":
-                out.append({"role": "tool", "tool_call_id": m.tool_call_id, "content": m.content})
+                out.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": m.tool_call_id,
+                        "content": m.content,
+                    }
+                )
             elif m.role == "assistant" and m.tool_calls:
                 out.append(
                     {
@@ -65,7 +72,9 @@ class OpenAIAdapter:
     ) -> LLMResponse:
         if not self.api_key:
             return LLMResponse(
-                finish_reason=FinishReason.ERROR, error="OpenAI API key not configured", model=self.model
+                finish_reason=FinishReason.ERROR,
+                error="OpenAI API key not configured",
+                model=self.model,
             )
 
         body: dict[str, Any] = {
@@ -80,18 +89,29 @@ class OpenAIAdapter:
                     "function": {
                         "name": t["name"],
                         "description": t["description"],
-                        "parameters": t.get("input_schema", {"type": "object", "properties": {}}),
+                        "parameters": t.get(
+                            "input_schema", {"type": "object", "properties": {}}
+                        ),
                     },
                 }
                 for t in tool_schemas
             ]
 
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
         try:
-            async with httpx.AsyncClient(timeout=settings.LLM_TIMEOUT_SECONDS) as client:
-                resp = await client.post(f"{self.base_url}/chat/completions", json=body, headers=headers)
+            async with httpx.AsyncClient(
+                timeout=settings.LLM_TIMEOUT_SECONDS
+            ) as client:
+                resp = await client.post(
+                    f"{self.base_url}/chat/completions", json=body, headers=headers
+                )
         except httpx.HTTPError as exc:
-            return LLMResponse(finish_reason=FinishReason.ERROR, error=str(exc), model=self.model)
+            return LLMResponse(
+                finish_reason=FinishReason.ERROR, error=str(exc), model=self.model
+            )
 
         if resp.status_code >= 400:
             return LLMResponse(
@@ -100,14 +120,38 @@ class OpenAIAdapter:
                 model=self.model,
             )
 
-        data = resp.json()
-        choice = (data.get("choices") or [{}])[0]
+        try:
+            data = resp.json()
+        except ValueError:
+            return LLMResponse(
+                finish_reason=FinishReason.ERROR,
+                error="provider returned a non-JSON success response",
+                model=self.model,
+            )
+        choices = data.get("choices") if isinstance(data, dict) else None
+        if not isinstance(choices, list) or not choices:
+            return LLMResponse(
+                finish_reason=FinishReason.ERROR,
+                error="provider response did not contain any completion choices",
+                model=data.get("model", self.model)
+                if isinstance(data, dict)
+                else self.model,
+            )
+        choice = choices[0] if isinstance(choices[0], dict) else {}
         msg = choice.get("message", {}) or {}
+        if not isinstance(msg, dict):
+            return LLMResponse(
+                finish_reason=FinishReason.ERROR,
+                error="provider completion choice did not contain a message",
+                model=data.get("model", self.model),
+            )
         calls = [
             ToolCall(
                 id=tc.get("id", ""),
                 name=(tc.get("function") or {}).get("name", ""),
-                arguments=parse_tool_input((tc.get("function") or {}).get("arguments", {})),
+                arguments=parse_tool_input(
+                    (tc.get("function") or {}).get("arguments", {})
+                ),
             )
             for tc in (msg.get("tool_calls") or [])
         ]
@@ -116,10 +160,12 @@ class OpenAIAdapter:
         return LLMResponse(
             text=(msg.get("content") or "").strip(),
             tool_calls=calls,
-            finish_reason=FinishReason.TOOL_USE if calls else (
-                FinishReason.LENGTH if finish == "length" else FinishReason.STOP
-            ),
+            finish_reason=FinishReason.TOOL_USE
+            if calls
+            else (FinishReason.LENGTH if finish == "length" else FinishReason.STOP),
             model=data.get("model", self.model),
-            usage=Usage(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)),
+            usage=Usage(
+                usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
+            ),
             raw_stop_reason=finish or "",
         )
