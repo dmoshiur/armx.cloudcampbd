@@ -47,8 +47,20 @@ jobs:
       - name: Analyze and compile Flutter Android client
         run: |
           flutter pub get
-          flutter analyze
-          flutter build apk --debug
+          if ! analyze_output="$(flutter analyze 2>&1)"; then
+            printf '%s\n' "$analyze_output"
+            annotation="$(printf '%s\n' "$analyze_output" | tail -40 | awk '{gsub(/%/, "%25"); gsub(/\r/, "%0D"); printf "%s%%0A", $0}')"
+            echo "::error title=Flutter analyze failed::$annotation"
+            exit 1
+          fi
+          printf '%s\n' "$analyze_output"
+          if ! build_output="$(flutter build apk --debug 2>&1)"; then
+            printf '%s\n' "$build_output"
+            annotation="$(printf '%s\n' "$build_output" | tail -60 | awk '{gsub(/%/, "%25"); gsub(/\r/, "%0D"); printf "%s%%0A", $0}')"
+            echo "::error title=Flutter Android build failed::$annotation"
+            exit 1
+          fi
+          printf '%s\n' "$build_output"
         working-directory: app
 
   root-image:

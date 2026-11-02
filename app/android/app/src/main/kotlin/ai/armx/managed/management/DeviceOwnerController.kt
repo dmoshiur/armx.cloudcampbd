@@ -30,6 +30,7 @@ class DeviceOwnerController(private val context: Context) {
         "kioskEnabled" to preferences.getBoolean(KEY_KIOSK, false),
         "launcherPinned" to preferences.getBoolean(KEY_LAUNCHER, false),
         "allowedPackages" to preferences.getStringSet(KEY_ALLOWED, setOf(context.packageName)).orEmpty().sorted(),
+        "restrictions" to preferences.getStringSet(KEY_RESTRICTIONS, emptySet()).orEmpty().sorted(),
         "usageAccess" to hasUsageAccess(),
         "provisioningCommand" to "adb shell dpm set-device-owner ${context.packageName}/.management.ArmxDeviceAdminReceiver",
     )
@@ -44,9 +45,16 @@ class DeviceOwnerController(private val context: Context) {
         return passcodes.change(current, replacement)
     }
 
-    fun applyPolicy(passcode: CharArray, requestedPackages: Set<String>, kiosk: Boolean): PolicyResult {
+    fun applyPolicy(
+        passcode: CharArray,
+        requestedPackages: Set<String>,
+        kiosk: Boolean,
+        launcher: Boolean,
+        restrictions: Set<String>,
+    ): PolicyResult {
         requireOwner()
         require(passcodes.verify(passcode)) { "Owner passcode rejected" }
+        require(restrictions.all { it in SUPPORTED_RESTRICTIONS }) { "Unsupported device restriction" }
         val launchable = launchableApplications().map { it.packageName }.toSet()
         val allowed = (requestedPackages intersect launchable) + context.packageName
         require(allowed.size <= MAX_ALLOWED_PACKAGES) { "Too many allowed applications" }
@@ -80,25 +88,34 @@ class DeviceOwnerController(private val context: Context) {
                         DevicePolicyManager.LOCK_TASK_FEATURE_GLOBAL_ACTIONS,
                 )
             }
-            installManagedLauncher()
-            MANAGED_RESTRICTIONS.forEach { policy.addUserRestriction(admin, it) }
         } else {
             policy.setUninstallBlocked(admin, context.packageName, false)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 policy.setUserControlDisabledPackages(admin, emptyList())
             }
             policy.setLockTaskPackages(admin, emptyArray())
-            clearManagedLauncher()
-            MANAGED_RESTRICTIONS.forEach { policy.clearUserRestriction(admin, it) }
         }
+
+        if (launcher) installManagedLauncher() else clearManagedLauncher()
+        MANAGED_RESTRICTIONS.values.forEach { policy.clearUserRestriction(admin, it) }
+        restrictions.forEach { policy.addUserRestriction(admin, MANAGED_RESTRICTIONS.getValue(it)) }
 
         preferences.edit()
             .putBoolean(KEY_KIOSK, kiosk)
+            .putBoolean(KEY_LAUNCHER, launcher)
             .putStringSet(KEY_ALLOWED, allowed)
             .putStringSet(KEY_SUSPENDED, suspended)
+            .putStringSet(KEY_RESTRICTIONS, restrictions)
             .apply()
         ManagementNotifications.showManagedStatus(context, kiosk)
-        return PolicyResult(allowed.sorted(), suspended.sorted(), failedToSuspend.sorted(), kiosk)
+        return PolicyResult(
+            allowed.sorted(),
+            suspended.sorted(),
+            failedToSuspend.sorted(),
+            kiosk,
+            launcher,
+            restrictions.sorted(),
+        )
     }
 
     /**
@@ -117,7 +134,7 @@ class DeviceOwnerController(private val context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             runCatching { policy.setUserControlDisabledPackages(admin, emptyList()) }
         }
-        MANAGED_RESTRICTIONS.forEach { runCatching { policy.clearUserRestriction(admin, it) } }
+        MANAGED_RESTRICTIONS.values.forEach { runCatching { policy.clearUserRestriction(admin, it) } }
         clearManagedLauncher()
         preferences.edit().clear().commit()
         policy.clearDeviceOwnerApp(context.packageName)
@@ -202,12 +219,16 @@ class DeviceOwnerController(private val context: Context) {
         val suspended: List<String>,
         val failedToSuspend: List<String>,
         val kiosk: Boolean,
+        val launcher: Boolean,
+        val restrictions: List<String>,
     ) {
         fun asMap(): Map<String, Any> = mapOf(
             "allowedPackages" to allowed,
             "suspendedPackages" to suspended,
             "failedToSuspend" to failedToSuspend,
             "kioskEnabled" to kiosk,
+            "launcherPinned" to launcher,
+            "restrictions" to restrictions,
         )
     }
 
@@ -217,11 +238,13 @@ class DeviceOwnerController(private val context: Context) {
         private const val KEY_LAUNCHER = "launcher_enabled"
         private const val KEY_ALLOWED = "allowed_packages"
         private const val KEY_SUSPENDED = "suspended_packages"
+        private const val KEY_RESTRICTIONS = "restrictions"
         private const val MAX_ALLOWED_PACKAGES = 200
-        private val MANAGED_RESTRICTIONS = setOf(
-            android.os.UserManager.DISALLOW_ADD_USER,
-            android.os.UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES,
-            android.os.UserManager.DISALLOW_SAFE_BOOT,
+        private val MANAGED_RESTRICTIONS = mapOf(
+            "no_add_users" to android.os.UserManager.DISALLOW_ADD_USER,
+            "no_unknown_sources" to android.os.UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES,
+            "no_safe_boot" to android.os.UserManager.DISALLOW_SAFE_BOOT,
         )
+        val SUPPORTED_RESTRICTIONS: Set<String> = MANAGED_RESTRICTIONS.keys
     }
 }

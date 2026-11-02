@@ -1,8 +1,11 @@
 from app.models.device import (
+    DeviceAppUsage,
     DeviceCommand,
+    DeviceConsentSession,
     DeviceStatus,
     DeviceUnlinkEvent,
     LinkedDevice,
+    ManagedDevicePolicy,
     ScreenShareSession,
 )
 from app.models.platform import (
@@ -44,6 +47,9 @@ __all__ = [
     "DeviceUnlinkEvent",
     "DeviceCommand",
     "ScreenShareSession",
+    "ManagedDevicePolicy",
+    "DeviceAppUsage",
+    "DeviceConsentSession",
     "ToolDefinition",
     "ToolUserOverride",
     "Approval",

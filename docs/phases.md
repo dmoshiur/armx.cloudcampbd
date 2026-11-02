@@ -9,9 +9,9 @@ shipped as additional reviewable phases:
 | B | Encrypted multi-provider/model admin, Groq/Llama default, weighted routing, failover and circuit health | **done** (live calls need provider keys) |
 | C | One-shot environment owner plus token-protected `/setup` wizard | **done** |
 | D | Accessible CMatrix tokens and reduced-motion animated backgrounds on web and Flutter | **done**; Flutter compile is enforced in CI |
-| E | Android Device Owner provisioning and managed launcher foundation | **next** |
-| F | Policy/app allowlist, owner-passcode deprovisioning and telemetry | planned |
-| G | Visible consented mirroring/voice sessions and admin audit controls | planned |
+| E | Android Device Owner provisioning, managed launcher and lock-task foundation | **source complete**; dedicated-device validation is release-gated |
+| F | Locally passcode-approved policy/app allowlist, standards deprovisioning and aggregate telemetry | **done**; backend and migration tests pass |
+| G | Visible consent sessions, transient JPEG mirroring, owner controls and audited read-only admin visibility | **done**; physical MediaProjection validation is release-gated |
 
 "Live-gated" means code paths are complete and tested, but third-party services
 need credentials that are never committed.

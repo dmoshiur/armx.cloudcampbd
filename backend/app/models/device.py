@@ -1,10 +1,10 @@
-"""Linked-device models (consent based pairing, owner-password unlink)."""
+"""Linked and managed-device models (consent based; owner controlled)."""
 from __future__ import annotations
 
 import enum
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, IDFormatMixin, TimestampMixin, utcnow
@@ -55,7 +55,7 @@ class DeviceUnlinkEvent(IDFormatMixin, Base):
 
 
 class DeviceCommand(IDFormatMixin, Base):
-    """Server -> device command queue the native app polls. No silent commands exist."""
+    """Server -> device command queue. Every supported command is user-visible."""
 
     __tablename__ = "device_commands"
 
@@ -71,7 +71,7 @@ class DeviceCommand(IDFormatMixin, Base):
 
 
 class ScreenShareSession(IDFormatMixin, Base):
-    """Live mirroring is always a visibly-flagged, instantly endable session."""
+    """Legacy mirror-session record retained for migration compatibility."""
 
     __tablename__ = "screen_share_sessions"
 
@@ -81,3 +81,64 @@ class ScreenShareSession(IDFormatMixin, Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ended_by: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+
+class ManagedDevicePolicy(IDFormatMixin, TimestampMixin, Base):
+    """Owner-authored policy that still requires local passcode approval to apply."""
+
+    __tablename__ = "managed_device_policies"
+
+    device_id: Mapped[str] = mapped_column(
+        ForeignKey("linked_devices.id", ondelete="CASCADE"), unique=True, index=True, nullable=False
+    )
+    policy_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    kiosk_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    launcher_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    usage_telemetry_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    allowed_packages: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    restrictions: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    local_approval_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    updated_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    last_applied_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+
+
+class DeviceAppUsage(IDFormatMixin, Base):
+    """Permission-scoped aggregate only: package, duration and launch count."""
+
+    __tablename__ = "device_app_usage"
+    __table_args__ = (
+        UniqueConstraint("device_id", "package_name", "window_start", "window_end", name="uq_device_usage_window"),
+    )
+
+    device_id: Mapped[str] = mapped_column(
+        ForeignKey("linked_devices.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    package_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    foreground_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    launch_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class DeviceConsentSession(IDFormatMixin, Base):
+    """Explicit device decision and visible indicator for mirror/voice sessions."""
+
+    __tablename__ = "device_consent_sessions"
+
+    device_id: Mapped[str] = mapped_column(
+        ForeignKey("linked_devices.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    requested_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)  # screen_share | voice
+    status: Mapped[str] = mapped_column(String(24), default="requested", nullable=False)
+    scopes: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    visible_indicator: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consented_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_by: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    device_note: Mapped[str] = mapped_column(String(300), default="", nullable=False)

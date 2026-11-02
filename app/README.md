@@ -44,9 +44,26 @@ the owner to:
 3. choose allowed launcher apps and explicitly enable kiosk mode; and
 4. optionally grant Android Usage Access for package/duration/count telemetry.
 
+Owner-authored web policies are staged as visible device commands. Kiosk, managed
+HOME, the app allowlist, and each supported user restriction apply only after the
+owner types that local passcode on the Android device. Aggregate usage remains an
+explicit policy toggle plus Android Usage Access permission; reports contain only
+package ID, foreground seconds, launch count, and time window.
+
 Deprovisioning requires that local passcode, unsuspends apps, clears lock-task and
 HOME policy, and calls Android's official `clearDeviceOwnerApp`. Removing the APK
 still uses Android's normal system-confirmed uninstall flow.
+
+## Visible screen sharing
+
+Screen sharing is a two-stage consent session: the web owner requests it, then the
+person holding the device accepts in A.R.M.X and approves Android's system
+MediaProjection prompt. A high-importance foreground notification and Android's
+system indicator remain visible with a one-tap Stop action. The host sends at most
+one scaled JPEG frame per second over HTTPS to the consent-scoped endpoint. The
+backend keeps only the latest bounded frame in memory, returns it with `no-store`
+headers, and removes it when either side ends or the bounded session expires. No
+frame is written to app or server storage.
 
 ## Honest limits (shown in the UI, not hidden)
 

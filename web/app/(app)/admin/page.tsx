@@ -33,6 +33,36 @@ interface AdminDevice {
   last_seen_at: string | null;
 }
 
+interface AdminManagementView {
+  read_only: true;
+  device_id: string;
+  owner_id: string;
+  capabilities: string[];
+  usage_detail: string;
+  policy: {
+    configured: boolean;
+    policy_version: number;
+    kiosk_enabled: boolean;
+    launcher_enabled: boolean;
+    usage_telemetry_enabled: boolean;
+    allowed_packages: string[];
+    restrictions: string[];
+    last_applied_version: number;
+    last_applied_at: string | null;
+    last_error: string;
+    pending_local_approval?: boolean;
+  };
+  consent_sessions: Array<{
+    id: string;
+    kind: string;
+    status: string;
+    scopes: string[];
+    visible_indicator: boolean;
+    requested_at: string;
+    ended_at: string | null;
+  }>;
+}
+
 const TABS = ["Overview", "Models", "Users", "Tools", "Audit", "Devices"] as const;
 type Tab = (typeof TABS)[number];
 
@@ -43,6 +73,7 @@ export default function AdminPage() {
   const [tab, setTab] = useState<Tab>("Overview");
   const [search, setSearch] = useState("");
   const [killDialog, setKillDialog] = useState(false);
+  const [inspectedDevice, setInspectedDevice] = useState<string | null>(null);
 
   const overview = useQuery({ queryKey: ["admin", "overview"], queryFn: () => api.get<AdminOverview>("/admin/overview") });
   const users = useQuery({
@@ -57,6 +88,12 @@ export default function AdminPage() {
     enabled: tab === "Audit",
   });
   const devices = useQuery({ queryKey: ["admin", "devices"], queryFn: () => api.get<AdminDevice[]>("/admin/devices"), enabled: tab === "Devices" });
+  const deviceManagement = useQuery({
+    queryKey: ["admin", "device-management", inspectedDevice],
+    queryFn: () => api.get<AdminManagementView>(`/admin/devices/${inspectedDevice}/management`),
+    enabled: tab === "Devices" && inspectedDevice !== null,
+    staleTime: 30_000,
+  });
   const chain = useQuery({
     queryKey: ["admin", "chain"],
     queryFn: () => api.get<{ ok: boolean; checked: number; broken_at?: number }>("/admin/audit/verify"),
@@ -302,15 +339,73 @@ export default function AdminPage() {
           <div className="divide-y divide-edge">
             {devices.data?.length === 0 && <p className="px-4 py-4 text-caption text-fgmuted">No devices linked.</p>}
             {devices.data?.map((device) => (
-              <div key={device.id} className="flex flex-wrap items-center gap-2 px-4 py-3">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-body">{device.name}</p>
-                  <p className="truncate text-caption text-fgmuted">
-                    {device.owner_email} · {device.platform} · {device.capabilities.join(", ")}
-                  </p>
+              <div key={device.id} className="px-4 py-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-body">{device.name}</p>
+                    <p className="truncate text-caption text-fgmuted">
+                      {device.owner_email} · {device.platform} · {device.capabilities.join(", ")}
+                    </p>
+                  </div>
+                  <Badge tone={device.status === "active" ? "success" : "neutral"}>{device.status}</Badge>
+                  <Badge>read-only</Badge>
+                  {device.capabilities.includes("management") && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setInspectedDevice((current) => (current === device.id ? null : device.id))}
+                    >
+                      {inspectedDevice === device.id ? "Hide management" : "Inspect management"}
+                    </Button>
+                  )}
                 </div>
-                <Badge tone={device.status === "active" ? "success" : "neutral"}>{device.status}</Badge>
-                <Badge>read-only</Badge>
+                {inspectedDevice === device.id && (
+                  <div className="mt-3 rounded-xl border border-edge bg-bg/50 p-4">
+                    {deviceManagement.isLoading && <LoadingBlock label="Loading audited management view" />}
+                    {deviceManagement.isError && (
+                      <ErrorState message={deviceManagement.error.message} onRetry={() => void deviceManagement.refetch()} />
+                    )}
+                    {deviceManagement.data && (
+                      <div className="space-y-4 text-caption">
+                        <div className="flex flex-wrap gap-2">
+                          <Badge tone="accent">Audited read-only view</Badge>
+                          <Badge>Policy v{deviceManagement.data.policy.policy_version}</Badge>
+                          <Badge tone={deviceManagement.data.policy.pending_local_approval ? "warning" : "success"}>
+                            {deviceManagement.data.policy.pending_local_approval
+                              ? "Pending local approval"
+                              : `Applied v${deviceManagement.data.policy.last_applied_version}`}
+                          </Badge>
+                        </div>
+                        <dl className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                          <div><dt className="text-fgmuted">Kiosk</dt><dd>{deviceManagement.data.policy.kiosk_enabled ? "Enabled" : "Off"}</dd></div>
+                          <div><dt className="text-fgmuted">Managed launcher</dt><dd>{deviceManagement.data.policy.launcher_enabled ? "Enabled" : "Off"}</dd></div>
+                          <div><dt className="text-fgmuted">Usage permission</dt><dd>{deviceManagement.data.policy.usage_telemetry_enabled ? "Owner enabled" : "Off"}</dd></div>
+                          <div><dt className="text-fgmuted">Allowed packages</dt><dd>{deviceManagement.data.policy.allowed_packages.length}</dd></div>
+                        </dl>
+                        <div>
+                          <p className="font-medium text-fg">Recent consent sessions</p>
+                          {deviceManagement.data.consent_sessions.length === 0 ? (
+                            <p className="mt-1 text-fgmuted">No consent sessions recorded.</p>
+                          ) : (
+                            <div className="mt-2 divide-y divide-edge">
+                              {deviceManagement.data.consent_sessions.slice(0, 8).map((session) => (
+                                <div key={session.id} className="flex flex-wrap items-center gap-2 py-2">
+                                  <code className="text-accent">{session.kind}</code>
+                                  <Badge tone={session.status === "active" ? "success" : session.status === "requested" ? "warning" : "neutral"}>
+                                    {session.status}
+                                  </Badge>
+                                  <span className="text-fgmuted">{session.scopes.join(", ")}</span>
+                                  <span className="ml-auto text-fgmuted">{new Date(session.requested_at).toLocaleString()}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <p className="border-t border-edge pt-3 text-fgmuted">{deviceManagement.data.usage_detail}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>

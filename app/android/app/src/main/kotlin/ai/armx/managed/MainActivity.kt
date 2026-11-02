@@ -26,6 +26,9 @@ class MainActivity : FlutterActivity() {
     private lateinit var owner: DeviceOwnerController
     private var pendingProjectionResult: MethodChannel.Result? = null
     private var pendingProjectionSession = ""
+    private var pendingProjectionApiBase = ""
+    private var pendingProjectionDeviceId = ""
+    private var pendingProjectionDeviceToken = ""
     private var pendingNotificationResult: MethodChannel.Result? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -72,12 +75,24 @@ class MainActivity : FlutterActivity() {
                     val until = call.argument<Number>("until")?.toLong() ?: System.currentTimeMillis()
                     result.success(UsageTelemetry(this).aggregate(since, until))
                 }
-                "requestScreenShare" -> requestScreenShare(call.string("sessionId"), result)
+                "requestScreenShare" -> requestScreenShare(
+                    call.string("sessionId"),
+                    call.string("apiBase"),
+                    call.string("deviceId"),
+                    call.string("deviceToken"),
+                    result,
+                )
                 "stopScreenShare" -> {
                     stopService(Intent(this, ProjectionService::class.java))
                     result.success(null)
                 }
-                "startVisibleVoiceSession" -> startVoice(call.string("sessionId"), result)
+                "startVisibleVoiceSession" -> startVoice(
+                    call.string("sessionId"),
+                    call.string("apiBase"),
+                    call.string("deviceId"),
+                    call.string("deviceToken"),
+                    result,
+                )
                 "stopVisibleVoiceSession" -> {
                     stopService(Intent(this, VisibleVoiceService::class.java))
                     result.success(null)
@@ -109,7 +124,10 @@ class MainActivity : FlutterActivity() {
         try {
             val allowed = call.argument<List<String>>("allowedPackages").orEmpty().toSet()
             val kiosk = call.argument<Boolean>("kioskEnabled") ?: false
-            val applied = owner.applyPolicy(passcode, allowed, kiosk)
+            val launcher = call.argument<Boolean>("launcherEnabled") ?: kiosk
+            val restrictions = call.argument<List<String>>("restrictions")?.toSet()
+                ?: if (kiosk) DeviceOwnerController.SUPPORTED_RESTRICTIONS else emptySet()
+            val applied = owner.applyPolicy(passcode, allowed, kiosk, launcher, restrictions)
             if (kiosk && isLockTaskPermitted()) {
                 startLockTask()
             } else if (!kiosk && isInLockTaskMode()) {
@@ -138,12 +156,24 @@ class MainActivity : FlutterActivity() {
         result.success(null)
     }
 
-    private fun requestScreenShare(sessionId: String, result: MethodChannel.Result) {
+    private fun requestScreenShare(
+        sessionId: String,
+        apiBase: String,
+        deviceId: String,
+        deviceToken: String,
+        result: MethodChannel.Result,
+    ) {
         if (!hasNotificationPermission()) throw SecurityException("Notification permission is required for visible screen sharing")
+        if (!apiBase.startsWith("https://") && !BuildConfig.DEBUG) {
+            throw SecurityException("Release mirroring requires an HTTPS API origin")
+        }
         if (pendingProjectionResult != null) throw IllegalStateException("A screen-share consent request is already open")
         val manager = getSystemService(MediaProjectionManager::class.java)
         pendingProjectionResult = result
         pendingProjectionSession = sessionId
+        pendingProjectionApiBase = apiBase.trimEnd('/')
+        pendingProjectionDeviceId = deviceId
+        pendingProjectionDeviceToken = deviceToken
         startActivityForResult(manager.createScreenCaptureIntent(), REQUEST_MEDIA_PROJECTION)
     }
 
@@ -154,7 +184,13 @@ class MainActivity : FlutterActivity() {
         val callback = pendingProjectionResult ?: return
         pendingProjectionResult = null
         val sessionId = pendingProjectionSession
+        val apiBase = pendingProjectionApiBase
+        val deviceId = pendingProjectionDeviceId
+        val deviceToken = pendingProjectionDeviceToken
         pendingProjectionSession = ""
+        pendingProjectionApiBase = ""
+        pendingProjectionDeviceId = ""
+        pendingProjectionDeviceToken = ""
         if (resultCode != Activity.RESULT_OK || data == null) {
             callback.success(mapOf("consented" to false))
             return
@@ -163,19 +199,34 @@ class MainActivity : FlutterActivity() {
             .putExtra(ProjectionService.EXTRA_RESULT_CODE, resultCode)
             .putExtra(ProjectionService.EXTRA_DATA, data)
             .putExtra(ProjectionService.EXTRA_SESSION_ID, sessionId)
+            .putExtra(ProjectionService.EXTRA_API_BASE, apiBase)
+            .putExtra(ProjectionService.EXTRA_DEVICE_ID, deviceId)
+            .putExtra(ProjectionService.EXTRA_DEVICE_CREDENTIAL, deviceToken)
         ContextCompat.startForegroundService(this, service)
         callback.success(mapOf("consented" to true, "visibleNotification" to true))
     }
 
-    private fun startVoice(sessionId: String, result: MethodChannel.Result) {
+    private fun startVoice(
+        sessionId: String,
+        apiBase: String,
+        deviceId: String,
+        deviceToken: String,
+        result: MethodChannel.Result,
+    ) {
         if (!hasNotificationPermission()) throw SecurityException("Notification permission is required for visible voice sessions")
+        if (!apiBase.startsWith("https://") && !BuildConfig.DEBUG) {
+            throw SecurityException("Release voice sessions require an HTTPS API origin")
+        }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             throw SecurityException("Microphone permission must be granted in the visible app before starting voice")
         }
         ContextCompat.startForegroundService(
             this,
             Intent(this, VisibleVoiceService::class.java)
-                .putExtra(VisibleVoiceService.EXTRA_SESSION_ID, sessionId),
+                .putExtra(VisibleVoiceService.EXTRA_SESSION_ID, sessionId)
+                .putExtra(VisibleVoiceService.EXTRA_API_BASE, apiBase.trimEnd('/'))
+                .putExtra(VisibleVoiceService.EXTRA_DEVICE_ID, deviceId)
+                .putExtra(VisibleVoiceService.EXTRA_DEVICE_CREDENTIAL, deviceToken),
         )
         result.success(mapOf("started" to true, "visibleNotification" to true))
     }

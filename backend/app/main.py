@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
-from app.api import admin, assistant, auth, devices, llm_admin, misc, setup
+from app.api import admin, assistant, auth, device_management, devices, llm_admin, misc, setup
 from app.audit import audit
 from app.core.bootstrap import seed_initial_admin
 from app.core.config import settings
@@ -157,7 +157,9 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix=settings.API_PREFIX)
     app.include_router(assistant.router, prefix=settings.API_PREFIX)
     app.include_router(devices.router, prefix=settings.API_PREFIX)
+    app.include_router(device_management.router, prefix=settings.API_PREFIX)
     app.include_router(admin.router, prefix=settings.API_PREFIX)
+    app.include_router(device_management.admin_router, prefix=settings.API_PREFIX)
     app.include_router(llm_admin.router, prefix=settings.API_PREFIX)
     app.include_router(misc.router, prefix=settings.API_PREFIX)
 

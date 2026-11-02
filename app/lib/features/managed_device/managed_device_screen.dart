@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/theme.dart';
 import '../../core/widgets/primitives.dart';
+import '../device_bridge/device_bridge.dart';
 import 'managed_device_controller.dart';
 
 class ManagedDeviceScreen extends StatefulWidget {
@@ -30,6 +31,7 @@ class _ManagedDeviceScreenState extends State<ManagedDeviceScreen> {
   @override
   Widget build(BuildContext context) {
     final controller = context.watch<ManagedDeviceController>();
+    final bridge = context.watch<DeviceBridge>();
     if (!controller.supported && !controller.loading) {
       return const ArmxEmptyState(
         title: 'Android Device Owner only',
@@ -52,6 +54,10 @@ class _ManagedDeviceScreenState extends State<ManagedDeviceScreen> {
         if (!controller.deviceOwner) _ProvisioningCard(state: controller.state),
         if (controller.deviceOwner) ...[
           _StatusCard(controller: controller),
+          if (bridge.pendingPolicy != null || bridge.pendingScreenShare != null || bridge.pendingVoiceSession != null) ...[
+            const SizedBox(height: 16),
+            _PendingOwnerActions(bridge: bridge),
+          ],
           const SizedBox(height: 16),
           if (!controller.notificationPermission)
             ArmxCard(
@@ -139,6 +145,61 @@ class _StatusCard extends StatelessWidget {
             ArmxBadge(controller.kioskEnabled ? 'KIOSK ACTIVE' : 'KIOSK OFF', tone: controller.kioskEnabled ? ArmxTone.accent : ArmxTone.neutral),
             ArmxBadge(controller.notificationPermission ? 'VISIBLE' : 'NOTIFICATIONS BLOCKED', tone: controller.notificationPermission ? ArmxTone.success : ArmxTone.danger),
             ArmxBadge(controller.usageAccess ? 'USAGE ALLOWED' : 'USAGE OFF', tone: controller.usageAccess ? ArmxTone.success : ArmxTone.neutral),
+          ],
+        ),
+      );
+}
+
+class _PendingOwnerActions extends StatelessWidget {
+  const _PendingOwnerActions({required this.bridge});
+  final DeviceBridge bridge;
+
+  @override
+  Widget build(BuildContext context) => ArmxCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const ArmxBadge('LOCAL DECISION REQUIRED', tone: ArmxTone.warning),
+            const SizedBox(height: 10),
+            Text('Pending owner actions', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 6),
+            Text('Remote requests cannot cross these gates. Approve or decline on this device.', style: Theme.of(context).textTheme.bodySmall),
+            if (bridge.pendingPolicy != null) ...[
+              const Divider(height: 24),
+              const Text('A management policy is waiting for the local owner passcode.'),
+              const SizedBox(height: 8),
+              ElevatedButton(
+                onPressed: () async {
+                  final passcode = await _passcodeDialog(context, title: 'Apply pending policy');
+                  if (passcode != null) await bridge.applyPendingPolicy(passcode);
+                },
+                child: const Text('Review and apply with passcode'),
+              ),
+            ],
+            if (bridge.pendingScreenShare != null) ...[
+              const Divider(height: 24),
+              const Text('Screen-share request. Android will show its own capture-consent dialog, system indicator and an ongoing Stop notification.'),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  OutlinedButton(onPressed: () => bridge.decidePendingScreenShare(false), child: const Text('Decline')),
+                  ElevatedButton(onPressed: () => bridge.decidePendingScreenShare(true), child: const Text('Review Android consent')),
+                ],
+              ),
+            ],
+            if (bridge.pendingVoiceSession != null) ...[
+              const Divider(height: 24),
+              const Text('Voice-session request. Microphone permission and an ongoing Stop notification are mandatory.'),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  OutlinedButton(onPressed: () => bridge.decidePendingVoiceSession(false), child: const Text('Decline')),
+                  ElevatedButton(onPressed: () => bridge.decidePendingVoiceSession(true), child: const Text('Start visible voice session')),
+                ],
+              ),
+            ],
           ],
         ),
       );
