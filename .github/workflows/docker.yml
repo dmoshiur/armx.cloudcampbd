@@ -44,10 +44,11 @@ jobs:
           flutter-version: "3.24.5"
           channel: stable
           cache: true
-      - name: Analyze Flutter client
+      - name: Analyze and compile Flutter Android client
         run: |
           flutter pub get
           flutter analyze
+          flutter build apk --debug
         working-directory: app
 
   root-image:

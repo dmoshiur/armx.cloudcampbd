@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">A.R.M.X Managed</string>
+    <string name="device_admin_label">A.R.M.X Device Owner</string>
+    <string name="device_admin_description">Manages only this visibly enrolled device: launcher policy, approved apps, kiosk state, and consented sessions.</string>
+    <string name="managed_channel_name">Managed device status</string>
+    <string name="projection_channel_name">Visible screen sharing</string>
+    <string name="voice_channel_name">Visible voice session</string>
+</resources>

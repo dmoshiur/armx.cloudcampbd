@@ -28,6 +28,10 @@ npm-debug.log*
 build/
 *.iml
 app/android/.gradle/
+app/android/local.properties
+app/android/key.properties
+*.jks
+*.keystore
 app/ios/Pods/
 
 # --- editors / os ---
