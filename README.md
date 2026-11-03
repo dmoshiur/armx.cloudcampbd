@@ -145,13 +145,33 @@ for secret rotation, backups and restore checks.
 | Smart home | reports "not configured" honestly | `HOME_ASSISTANT_URL/TOKEN` |
 | Web search | reports "not configured" | `SEARCH_PROVIDER` + key |
 | Read-only mail | reports "not configured" | `IMAP_*` |
-| WhatsApp / Messenger | simulated | `MESSAGING_MODE=live` + tokens |
-| Linked devices, calls, app launch | **API + native client live**; execution happens on the device | pair a device |
-| Native app (Flutter) | complete source in `app/` | `flutter pub get && flutter run` |
+| WhatsApp / Messenger outbound | simulated | `MESSAGING_MODE=live` + access tokens |
+| WhatsApp inbound webhook | signature-verified endpoint, auto-reply disabled | separate `WHATSAPP_VERIFY_TOKEN` + `WHATSAPP_APP_SECRET` |
+| Linked devices, calls, app launch | **API + Android client foundation live**; host execution remains platform-specific | pair a device |
+| Native app (Flutter) | Android source in `app/`; desktop runners are a staged release target | `flutter pub get && flutter run` |
 
-Nothing silently pretends to work: every unavailable integration returns a
-structured "not configured" payload that the UI renders, and every simulated
-response carries `simulated: true`.
+The web background uses the MIT-licensed `cmatrix` browser canvas package rather
+than a CSS imitation. Continuous animation is disabled when the operating system
+requests reduced motion.
+
+Nothing silently pretends to work: configured LLM routes are shown as
+**unverified** until a real completion succeeds, failed routes are degraded and
+use the labelled offline fallback, and every API error includes an `X-Request-ID`
+that can be matched to server logs. Provider attempts and the complete failover
+path have independent deadlines, so a dead provider cannot leave chat waiting
+indefinitely. Every unavailable integration returns a structured "not configured"
+payload, and every simulated response carries `simulated: true`.
+
+### WhatsApp webhook setup
+
+Use `https://YOUR_RENDER_HOST/api/webhooks/whatsapp` as Meta's callback URL.
+`WHATSAPP_TOKEN` is the outbound Graph API access token; it is **not** accepted as
+the verification token. Generate a different random `WHATSAPP_VERIFY_TOKEN`, and
+set `WHATSAPP_APP_SECRET` to the app secret from Meta. GET subscription challenges
+use the verification token, while every POST is authenticated against the exact
+raw request body with `X-Hub-Signature-256`. Signed events are acknowledged but
+are not allowed to execute tools or auto-reply until a contact is explicitly
+mapped to a tenant.
 
 ---
 
@@ -170,7 +190,7 @@ backend/            FastAPI core
   app/integrations/ home_assistant, github_vercel, turso, search, mail, messaging, telecom
   app/builder/      sandbox generator, design lint, signed previews
   alembic/          migrations (initial schema committed)
-  tests/            68 tests: auth, gateway, injection, devices, builder, hardening
+  tests/            90 tests: auth, routing, webhooks, gateway, devices, builder, hardening
 web/                Next.js 15 + Tailwind (App Router)
   components/ui/    the shared component library
   lib/api/          typed client with rotating-token refresh

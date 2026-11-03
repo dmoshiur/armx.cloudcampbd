@@ -94,11 +94,28 @@ export default function AssistantPage() {
     setTurns((prev) => [...prev, userTurn]);
     scrollToBottom();
 
+    const controller = new AbortController();
+    // The API has a 50s deadline; this slightly longer browser guard also
+    // covers proxy/network failures where no response arrives at all.
+    const timeout = window.setTimeout(() => controller.abort(), 55_000);
     try {
-      const data = await api.post<ChatResponse>("/assistant/chat", {
-        message,
-        conversation_id: activeId,
-      });
+      const data = await api.post<ChatResponse>(
+        "/assistant/chat",
+        {
+          message,
+          conversation_id: activeId,
+        },
+        { signal: controller.signal },
+      );
+      if (data.status === "complete" && !data.reply.trim() && !data.approval) {
+        throw new ApiError(
+          "The provider returned an empty response. Test the active model in LLM settings.",
+          502,
+          "empty_assistant_response",
+          data,
+          data.request_id,
+        );
+      }
       setActiveId(data.conversation_id);
       setTurns((prev) => [
         ...prev,
@@ -115,10 +132,18 @@ export default function AssistantPage() {
       if (data.status === "error") setError(data.error ?? "The assistant hit an error");
       void loadConversations();
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Could not reach the assistant";
+      const aborted = err instanceof DOMException && err.name === "AbortError";
+      const base = aborted
+        ? "The assistant request timed out after 55 seconds. Check the audit log before retrying a tool command."
+        : err instanceof ApiError
+          ? err.message
+          : "Could not reach the assistant";
+      const requestId = err instanceof ApiError && err.requestId ? ` Request ID: ${err.requestId}.` : "";
+      const msg = `${base}${requestId}`;
       setError(msg);
       toast.push(msg, "error");
     } finally {
+      window.clearTimeout(timeout);
       setBusy(false);
       scrollToBottom();
     }
@@ -197,7 +222,7 @@ export default function AssistantPage() {
   const showEmpty = turns.length === 0 && !loadingHistory;
 
   return (
-    <div className="lg:grid lg:grid-cols-[280px_1fr] lg:gap-6">
+    <div className="mx-auto w-full max-w-[1560px] lg:grid lg:grid-cols-[300px_minmax(0,1fr)] lg:gap-5 xl:gap-7">
       {/* Conversation list: drawer on compact, column on expanded */}
       <div
         className={clsx(
@@ -205,9 +230,12 @@ export default function AssistantPage() {
           historyOpen ? "block" : "hidden lg:block",
         )}
       >
-        <Card className="p-3">
-          <div className="mb-2 flex items-center justify-between gap-2 px-1">
-            <h2 className="text-caption font-semibold uppercase tracking-wide text-fgmuted">Conversations</h2>
+        <Card className="overflow-hidden border-edge/70 bg-surface/75 p-3 shadow-2xl shadow-black/20 backdrop-blur-xl">
+          <div className="mb-3 flex items-center justify-between gap-2 border-b border-edge/70 px-1 pb-3">
+            <div>
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.22em] text-accent/80">Workspace</p>
+              <h2 className="text-caption font-semibold uppercase tracking-wide text-fgmuted">Conversations</h2>
+            </div>
             <Button size="sm" variant="secondary" onClick={startNew}>
               New
             </Button>
@@ -232,12 +260,17 @@ export default function AssistantPage() {
       </div>
 
       {/* Thread */}
-      <div className="flex min-h-[calc(100vh-190px)] flex-col">
-        <div className="mb-3 flex items-center justify-between gap-2">
+      <section className="relative flex min-h-[calc(100vh-150px)] flex-col overflow-hidden rounded-xl border border-edge/70 bg-bg/75 shadow-2xl shadow-black/30 backdrop-blur-xl">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-accent/5 to-transparent" />
+        <div className="relative flex items-start justify-between gap-4 border-b border-edge/60 px-4 py-4 sm:px-6">
           <div>
-            <h1 className="text-h1">Assistant</h1>
-            <p className="mt-1 text-caption text-fgmuted">
-              Healthy models plan; the security gateway authorises. Medium- and high-risk actions pause for your approval.
+            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.24em] text-accent">Secure intelligence console</p>
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-h1">A.R.M.X Assistant</h1>
+              <Badge tone="success">Gateway protected</Badge>
+            </div>
+            <p className="mt-1.5 max-w-3xl text-caption text-fgmuted">
+              Live models plan; the security gateway authorises. Sensitive actions always pause for your explicit approval.
             </p>
           </div>
           <Button variant="secondary" size="sm" className="lg:hidden" onClick={() => setHistoryOpen((v) => !v)}>
@@ -245,7 +278,7 @@ export default function AssistantPage() {
           </Button>
         </div>
 
-        <div className="flex-1 space-y-4 overflow-y-auto pb-4">
+        <div className="relative min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-6 sm:px-6">
           {loadingHistory && (
             <div className="space-y-3">
               <Skeleton className="h-16 w-2/3" />
@@ -259,13 +292,13 @@ export default function AssistantPage() {
               title="Ask for something real"
               description="Try one of these. Anything that touches a device, a repository or another person will ask you first."
               action={
-                <div className="mt-2 flex flex-wrap justify-center gap-2">
+                <div className="mt-4 grid w-full gap-2 sm:grid-cols-2">
                   {SUGGESTIONS.map((s) => (
                     <button
                       key={s}
                       type="button"
                       onClick={() => void send(s)}
-                      className="min-h-[40px] rounded-full border border-edge px-3 text-caption text-fgmuted transition hover:border-accent/60 hover:text-fg"
+                      className="min-h-[48px] rounded-md border border-edge/70 bg-surface/55 px-4 py-2 text-left text-caption text-fgmuted transition hover:-translate-y-0.5 hover:border-accent/60 hover:bg-accent/5 hover:text-fg"
                     >
                       {s}
                     </button>
@@ -280,8 +313,10 @@ export default function AssistantPage() {
               <div className={clsx("max-w-full space-y-3 sm:max-w-[86%]", turn.role === "user" && "sm:max-w-[70%]")}>
                 <div
                   className={clsx(
-                    "whitespace-pre-wrap rounded-lg px-4 py-3 text-body",
-                    turn.role === "user" ? "bg-accent text-ink" : "border border-edge bg-surface text-fg",
+                    "whitespace-pre-wrap rounded-lg px-4 py-3 text-body shadow-lg",
+                    turn.role === "user"
+                      ? "rounded-br-sm bg-gradient-to-br from-accent to-emerald-400 text-ink shadow-accent/10"
+                      : "rounded-bl-sm border border-edge/70 bg-surface/85 text-fg shadow-black/20 backdrop-blur",
                   )}
                 >
                   {turn.content}
@@ -308,7 +343,7 @@ export default function AssistantPage() {
         </div>
 
         {/* Composer */}
-        <div className="sticky bottom-16 border-t border-edge bg-bg pt-3 md:bottom-0">
+        <div className="relative border-t border-edge/60 bg-surface/75 p-3 backdrop-blur-xl sm:p-4">
           <form
             onSubmit={(event) => {
               event.preventDefault();
@@ -332,6 +367,7 @@ export default function AssistantPage() {
               }}
               placeholder="Ask A.R.M.X anything…"
               aria-describedby="composer-hint"
+              className="min-h-[68px] resize-none border-edge/70 bg-bg/70 px-4 py-3 shadow-inner"
             />
             <div className="flex items-center justify-between gap-2">
               <p id="composer-hint" className="text-caption text-fgmuted">
@@ -348,7 +384,7 @@ export default function AssistantPage() {
             </div>
           </form>
         </div>
-      </div>
+      </section>
 
       {approval && (
         <ConfirmActionDialog

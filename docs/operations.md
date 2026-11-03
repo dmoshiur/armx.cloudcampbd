@@ -65,7 +65,14 @@ failed migration or initial Turso synchronization stops startup.
   Rotating it requires re-entering every admin-managed provider key.
 - `GROQ_API_KEY`: seeds Groq as priority 10 with configurable `GROQ_MODEL`.
   `OPENAI_API_KEY` and Anthropic keys seed priority-20 fallbacks; all other public
-  OpenAI-compatible HTTPS providers are added in Admin → Models.
+  OpenAI-compatible HTTPS providers are added in Admin → Models. Keep provider,
+  total-route, and request budgets ordered with `LLM_TIMEOUT_SECONDS=25`,
+  `LLM_ROUTE_TIMEOUT_SECONDS=45`, and `ASSISTANT_REQUEST_TIMEOUT_SECONDS=50`.
+  The header says *unverified* until a live completion succeeds; configured is not
+  treated as healthy.
+- `WHATSAPP_VERIFY_TOKEN` and `WHATSAPP_APP_SECRET` are required only for inbound
+  WhatsApp. Register `https://HOST/api/webhooks/whatsapp` in Meta. Do not reuse
+  `WHATSAPP_TOKEN`: that is the separate outbound Graph API access token.
 - `FIRST_ADMIN_EMAIL` + `FIRST_ADMIN_PASSWORD`, or `INITIAL_SETUP_TOKEN`: choose one
   first-run bootstrap. Neither path overwrites an existing administrator.
 
