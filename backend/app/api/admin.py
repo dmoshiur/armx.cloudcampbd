@@ -15,6 +15,8 @@ from app.core.deps import client_ip, require_admin
 from app.models import (
     Approval,
     AuditEvent,
+    EmailDelivery,
+    EmailDeliveryEvent,
     GeneratedProject,
     LinkedDevice,
     Session,
@@ -344,3 +346,56 @@ async def all_approvals(
         }
         for a in rows
     ]
+
+
+@router.get("/email-deliveries")
+async def email_deliveries(
+    status: str = Query(default="", max_length=24),
+    purpose: str = Query(default="", max_length=32),
+    limit: int = Query(default=50, ge=1, le=200),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Server-authorised delivery ledger. No API key or raw token is exposed."""
+    stmt = select(EmailDelivery).order_by(EmailDelivery.created_at.desc()).limit(limit)
+    if status:
+        stmt = stmt.where(EmailDelivery.status == status)
+    if purpose:
+        stmt = stmt.where(EmailDelivery.purpose == purpose)
+    rows = (await db.execute(stmt)).scalars().all()
+    event_count = (await db.execute(select(func.count(EmailDeliveryEvent.id)))).scalar_one()
+    return {
+        "items": [
+            {
+                "id": row.id,
+                "recipient": row.recipient,
+                "purpose": row.purpose,
+                "subject": row.subject,
+                "status": row.status,
+                "provider": row.provider,
+                "provider_message_id": row.provider_message_id,
+                "attempts": row.attempts,
+                "request_id": row.request_id,
+                "last_error": row.last_error,
+                "created_at": row.created_at.isoformat(),
+                "accepted_at": row.accepted_at.isoformat() if row.accepted_at else None,
+                "sent_at": row.sent_at.isoformat() if row.sent_at else None,
+                "delivered_at": row.delivered_at.isoformat() if row.delivered_at else None,
+                "failed_at": row.failed_at.isoformat() if row.failed_at else None,
+            }
+            for row in rows
+        ],
+        "event_count": int(event_count),
+        "status_legend": [
+            "requested",
+            "accepted (API request accepted, not delivered)",
+            "sent",
+            "delivered",
+            "delayed",
+            "bounced",
+            "complained",
+            "failed",
+            "not_configured",
+        ],
+        "viewer": admin.email,
+    }

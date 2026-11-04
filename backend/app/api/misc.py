@@ -89,16 +89,31 @@ async def upload_media(
     ctx: AuthContext = Depends(get_auth_context),
 ) -> dict[str, Any]:
     content_type = (file.content_type or "").lower()
-    if content_type not in media.ALLOWED_IMAGE_TYPES:
-        raise HTTPException(status_code=415, detail="Upload PNG, JPEG or WebP")
+    filename = (file.filename or "attachment")[:120]
+    if content_type not in media.ALLOWED_UPLOAD_TYPES:
+        raise HTTPException(
+            status_code=415,
+            detail="Upload PNG, JPEG, WebP, PDF, TXT, MD, CSV, JSON or DOCX",
+        )
     blob = await file.read(settings.MAX_UPLOAD_BYTES + 1)
     if len(blob) > settings.MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File too large")
     try:
-        record = media.save_bytes(ctx.user.id, blob, content_type, {"filename": (file.filename or "")[:120]})
+        media.validate_upload(content_type, blob)
+        record = media.save_bytes(ctx.user.id, blob, content_type, {"filename": filename})
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"asset_id": record["asset_id"], "url": f"/api/media/{record['asset_id']}", "bytes": record["bytes"]}
+    return {
+        "asset_id": record["asset_id"],
+        "url": f"/api/media/{record['asset_id']}",
+        "filename": filename,
+        "content_type": content_type,
+        "kind": "image" if content_type in media.ALLOWED_IMAGE_TYPES else "document",
+        "bytes": record["bytes"],
+        "text": media.extract_text(content_type, blob, filename=filename)
+        if content_type not in media.ALLOWED_IMAGE_TYPES
+        else "",
+    }
 
 
 @router.get("/media/{asset_id}")
@@ -131,12 +146,16 @@ async def list_projects(
             "id": p.id,
             "name": p.name,
             "slug": p.slug,
+            "description": p.description,
             "status": p.status,
             "lint_status": p.lint_status,
             "repo_url": p.repo_url,
             "repo_is_platform_owned": p.repo_is_platform_owned,
             "vercel_url": p.vercel_url,
             "deploy_status": p.deploy_status,
+            "deploy_provider": p.deploy_provider,
+            "deploy_confirmed_at": p.deploy_confirmed_at.isoformat() if p.deploy_confirmed_at else None,
+            "deploy_message": p.deploy_message,
             "turso_db_ref": p.turso_db_ref,
             "updated_at": p.updated_at.isoformat(),
         }
@@ -314,6 +333,12 @@ async def public_config(db: AsyncSession = Depends(get_db)) -> JSONResponse:
                 "push_to_talk": True,
                 "pipeline_mode": settings.PIPELINE_MODE,
                 "messaging_mode": settings.MESSAGING_MODE,
+                "resend_email": settings.resend_configured,
+                "resend_webhooks": bool(settings.RESEND_WEBHOOK_SECRET),
+                "password_reset_ttl_minutes": settings.PASSWORD_RESET_TTL_MINUTES,
+                "email_resend_cooldown_seconds": settings.EMAIL_RESEND_COOLDOWN_SECONDS,
+                "remember_me_sessions": True,
+                "http_only_cookies": True,
             },
             "planner": await provider_status_async(db),
         }

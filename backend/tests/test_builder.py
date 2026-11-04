@@ -98,16 +98,20 @@ def test_destination_allowlist_blocks_unknown_repos(monkeypatch):
         ensure_destination_allowed("attacker", "some-repo")
 
 
-async def test_simulated_deploy_marks_itself_simulated():
+async def test_simulated_deploy_is_honest_about_no_provider_confirmation():
+    """No provider call means no READY, no URL and no successful deployment."""
     files = {"index.html": GOOD_PAGE}
     result = await deploy_project(name="Demo", slug="demo", user_id="u" * 32, files=files)
-    assert result.ok is True
+    assert result.ok is False
     assert result.simulated is True
-    assert result.url.endswith(".vercel.app")
-    assert result.repo_is_platform_owned is True
+    assert result.status == "not_configured"
+    assert result.url == ""
+    assert result.repo_url == ""
+    assert "No deployment was created" in result.error
+    assert all("NOT" in line or "not configured" in line for line in result.log)
 
 
-async def test_deploy_requires_approval_then_goes_live(client, auth_headers):
+async def test_deploy_requires_approval_then_reports_configuration_requirement(client, auth_headers):
     # Generate through the assistant (approval), then deploy (approval).
     first = await client.post(
         "/api/assistant/chat", headers=auth_headers,
@@ -138,9 +142,19 @@ async def test_deploy_requires_approval_then_goes_live(client, auth_headers):
     assert payload["status"] == "complete"
     deploy_events = [e for e in payload["tool_events"] if e["tool"] == "web_deploy"]
     assert deploy_events and deploy_events[0]["result"]["data"]["simulated"] is True
+    assert deploy_events[0]["result"]["ok"] is False
 
     projects = await client.get("/api/projects", headers=auth_headers)
-    assert projects.json()[0]["status"] == "deployed"
+    project = projects.json()[0]
+    assert project["status"] == "not_configured"
+    assert project["repo_url"] == ""
+    assert project["vercel_url"] == ""
+
+    status = await client.get(f"/api/projects/{project['id']}/deploy-status", headers=auth_headers)
+    assert status.status_code == 200
+    assert status.json()["confirmed"] is False
+    assert status.json()["configured"] is False
+    assert "No deployment provider" in status.json()["detail"]
 
 
 async def test_rejected_approval_executes_nothing(client, auth_headers):

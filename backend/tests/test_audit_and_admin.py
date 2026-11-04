@@ -36,6 +36,7 @@ async def test_audit_chain_detects_tampering(db, user_tokens):
 async def test_admin_endpoints_require_admin(client, auth_headers):
     for path in ("/api/admin/overview", "/api/admin/users", "/api/admin/audit", "/api/admin/devices"):
         assert (await client.get(path, headers=auth_headers)).status_code == 403
+        client.cookies.clear()
         assert (await client.get(path)).status_code == 401
 
 

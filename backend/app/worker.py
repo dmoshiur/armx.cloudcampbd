@@ -10,12 +10,13 @@ import logging
 import signal
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select
 
 from app.core.config import settings
 from app.core.db import SessionLocal
-from app.models import Approval, PasswordResetToken, RateLimitCounter, SearchLog, Ticket
+from app.models import PasswordResetToken, RateLimitCounter, SearchLog, Ticket
 from app.registry import registry
+from app.security import expire_stale_approvals
 
 log = logging.getLogger("armx.worker")
 
@@ -25,14 +26,9 @@ TICK_SECONDS = 30
 async def housekeeping() -> None:
     now = datetime.now(timezone.utc)
     async with SessionLocal() as db:
-        expired = await db.execute(
-            update(Approval)
-            .where(Approval.status == "pending")
-            .values(status="expired")
-            .where(Approval.expires_at < now)
-        )
-        if expired.rowcount:
-            log.info("expired %s stale approvals", expired.rowcount)
+        expired_count = await expire_stale_approvals(db)
+        if expired_count:
+            log.info("expired %s stale approvals and marked their runs expired", expired_count)
 
         await db.execute(delete(Ticket).where(Ticket.expires_at < now))
         await db.execute(delete(PasswordResetToken).where(PasswordResetToken.expires_at < now))

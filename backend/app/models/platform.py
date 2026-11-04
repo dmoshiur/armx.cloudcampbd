@@ -158,6 +158,12 @@ class GeneratedProject(IDFormatMixin, TimestampMixin, Base):
     vercel_url: Mapped[str] = mapped_column(String(300), default="", nullable=False)
     deploy_status: Mapped[str] = mapped_column(String(24), default="", nullable=False)
     turso_db_ref: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    # Provider-confirmed deployment tracking. Empty = no provider confirmation.
+    deployment_id: Mapped[str] = mapped_column(String(200), default="", nullable=False, server_default="")
+    deploy_provider: Mapped[str] = mapped_column(String(40), default="", nullable=False, server_default="")
+    deploy_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deploy_message: Mapped[str] = mapped_column(Text, default="", nullable=False, server_default="")
+    simulated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
 
 
 class MessagingProfile(IDFormatMixin, TimestampMixin, Base):
@@ -196,6 +202,14 @@ class Conversation(IDFormatMixin, TimestampMixin, Base):
 
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String(160), default="New chat", nullable=False)
+    # Durable conversation management (migration b7e41c9d2a10).
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
+    model: Mapped[str] = mapped_column(String(160), default="", nullable=False, server_default="")
+    token_usage: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
+    project_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    summary: Mapped[str] = mapped_column(Text, default="", nullable=False, server_default="")
+    message_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
 
 
 class Message(IDFormatMixin, Base):
@@ -208,6 +222,14 @@ class Message(IDFormatMixin, Base):
     content: Mapped[str] = mapped_column(Text, default="", nullable=False)
     tool_calls: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    # Exact model + accounting for this message (never guessed on the client).
+    model: Mapped[str] = mapped_column(String(160), default="", nullable=False, server_default="")
+    provider: Mapped[str] = mapped_column(String(64), default="", nullable=False, server_default="")
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
+    status: Mapped[str] = mapped_column(String(16), default="complete", nullable=False, server_default="complete")
+    error: Mapped[str] = mapped_column(Text, default="", nullable=False, server_default="")
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ChatRun(IDFormatMixin, TimestampMixin, Base):
@@ -225,6 +247,89 @@ class ChatRun(IDFormatMixin, TimestampMixin, Base):
     pending_approval_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     paused_call_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
     steps: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    request_id: Mapped[str] = mapped_column(String(32), default="", nullable=False, server_default="")
+    provider: Mapped[str] = mapped_column(String(64), default="", nullable=False, server_default="")
+    model: Mapped[str] = mapped_column(String(160), default="", nullable=False, server_default="")
+    stopped: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
+
+
+# ---------------------------------------------------------------------------
+# Workspace intelligence (migration b7e41c9d2a10)
+# ---------------------------------------------------------------------------
+class UserPreference(IDFormatMixin, TimestampMixin, Base):
+    """Server-side, per-user UI/AI preferences. No secrets are stored here."""
+
+    __tablename__ = "user_preferences"
+
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True, nullable=False
+    )
+    settings: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+
+
+class MemoryItem(IDFormatMixin, TimestampMixin, Base):
+    """Structured long-term memory. Chat history is NOT memory by default."""
+
+    __tablename__ = "memory_items"
+    __table_args__ = (UniqueConstraint("user_id", "content_hash", name="uq_memory_user_hash"),)
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    category: Mapped[str] = mapped_column(String(40), default="explicit_instruction", nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(24), default="explicit", nullable=False)
+    source_conversation_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    importance: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    keywords: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    use_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class MessageFeedback(IDFormatMixin, Base):
+    __tablename__ = "message_feedback"
+    __table_args__ = (UniqueConstraint("user_id", "message_id", name="uq_feedback_user_message"),)
+
+    user_id: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    message_id: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    rating: Mapped[str] = mapped_column(String(16), nullable=False)  # up | down
+    comment: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class LLMRequestLog(IDFormatMixin, Base):
+    """Per-attempt provider observability. Contains no prompts or keys."""
+
+    __tablename__ = "llm_request_logs"
+
+    user_id: Mapped[str] = mapped_column(String(32), default="", index=True, nullable=False)
+    conversation_id: Mapped[str] = mapped_column(String(32), default="", index=True, nullable=False)
+    request_id: Mapped[str] = mapped_column(String(32), default="", index=True, nullable=False)
+    provider: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    model: Mapped[str] = mapped_column(String(160), default="", nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="ok", nullable=False)
+    error_code: Mapped[str] = mapped_column(String(48), default="", nullable=False)
+    error: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    streamed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class ProjectVersion(IDFormatMixin, Base):
+    """Immutable snapshot of generated project files, for real version history."""
+
+    __tablename__ = "project_versions"
+    __table_args__ = (UniqueConstraint("project_id", "version", name="uq_project_version"),)
+
+    project_id: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    files_json: Mapped[str] = mapped_column(Text, nullable=False)
+    note: Mapped[str] = mapped_column(String(300), default="", nullable=False)
+    created_by: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
 class RateLimitCounter(IDFormatMixin, Base):

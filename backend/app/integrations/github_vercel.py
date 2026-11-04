@@ -211,6 +211,7 @@ class DeployResult:
     log: list[str] = None  # type: ignore[assignment]
     error: str = ""
     turso_db: str = ""
+    deployment_id: str = ""
 
     def __post_init__(self) -> None:
         if self.log is None:
@@ -228,8 +229,52 @@ class DeployResult:
             "url": self.url,
             "status": self.status,
             "turso_db": self.turso_db,
+            "deployment_id": self.deployment_id,
             "log": self.log,
             "error": self.error,
+        }
+
+
+async def deployment_state(deployment_id: str) -> dict[str, Any]:
+    """Ask the actual deployment provider. Never invent READY from local state."""
+    if not settings.VERCEL_TOKEN or settings.PIPELINE_MODE != "live":
+        return {
+            "configured": False,
+            "confirmed": False,
+            "state": "not_configured",
+            "detail": "Live Vercel credentials are not configured; no provider status can be confirmed.",
+        }
+    params = {"teamId": settings.VERCEL_TEAM_ID} if settings.VERCEL_TEAM_ID else {}
+    headers = {"Authorization": f"Bearer {settings.VERCEL_TOKEN}"}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{VCL_API}/v13/deployments/{deployment_id}", params=params, headers=headers
+            )
+        if resp.status_code >= 400:
+            return {
+                "configured": True,
+                "confirmed": False,
+                "state": "provider_error",
+                "detail": f"Vercel returned {resp.status_code}: {resp.text[:200]}",
+            }
+        data = resp.json()
+        ready = data.get("readyState") or data.get("state") or (data.get("status") or "UNKNOWN")
+        return {
+            "configured": True,
+            "confirmed": ready == "READY",
+            "state": ready,
+            "url": f"https://{data['url']}" if data.get("url") else "",
+            "deployment_id": deployment_id,
+            "checked_at": int(time.time()),
+            "detail": "Provider-confirmed status from the Vercel deployments API.",
+        }
+    except httpx.HTTPError as exc:
+        return {
+            "configured": True,
+            "confirmed": False,
+            "state": "provider_unavailable",
+            "detail": f"Could not reach Vercel: {exc}",
         }
 
 
@@ -247,29 +292,30 @@ async def deploy_project(
     project = vercel_project_name(slug)
 
     if simulated:
+        # Honest configuration requirement: no provider confirmed anything, so
+        # no repository, URL, READY state or "deployed" project is recorded.
         owner = user_github_owner or settings.GITHUB_DEFAULT_ORG or "armx-projects"
-        platform_owned = user_github_owner is None
         result = DeployResult(
-            ok=True,
+            ok=False,
             simulated=True,
             owner=owner,
             repo=repo,
-            repo_url=f"https://github.com/{owner}/{repo}",
-            repo_is_platform_owned=platform_owned,
             vercel_project=project,
-            url=f"https://{project}.vercel.app",
-            status="READY",
-            turso_db=f"{repo}-db" if with_database else "",
+            status="not_configured",
+            error=(
+                "No deployment was created. PIPELINE_MODE=simulated means GitHub and Vercel "
+                "were never called. Set PIPELINE_MODE=live with GITHUB_TOKEN, VERCEL_TOKEN and "
+                "GITHUB_ALLOWED_TARGETS, then approve a new deployment."
+            ),
         )
         result.log = [
-            f"[simulated] destination allowlist check for {owner}/{repo}",
-            f"[simulated] created public repository {owner}/{repo} ({len(files)} files)",
-            f"[simulated] pushed commit to main",
-            f"[simulated] created Vercel project {project}",
-            f"[simulated] deployment READY at {result.url}",
+            f"[not configured] would target {owner}/{repo} after the allowlist check",
+            f"[not configured] {len(files)} generated files were NOT pushed",
+            f"[not configured] Vercel project {project} was NOT created",
+            "[not configured] no provider confirmed a deployment; nothing is live",
         ]
         if with_database:
-            result.log.append(f"[simulated] provisioned Turso database {repo}-db (project-scoped)")
+            result.log.append("[not configured] no project database was provisioned")
         return result
 
     if not settings.GITHUB_TOKEN or not settings.VERCEL_TOKEN:
@@ -321,6 +367,7 @@ async def deploy_project(
             status=state,
             log=log,
             turso_db=turso_db,
+            deployment_id=str(dep_id or ""),
             error="" if state == "READY" else f"Deployment ended in state {state}",
         )
     except Exception as exc:

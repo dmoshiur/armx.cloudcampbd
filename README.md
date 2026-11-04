@@ -62,9 +62,11 @@ make test                    # backend tests (auth, routing, gateway, devices, p
 # 3. Approve → the project list shows the repo, deployment and (optional) Turso DB
 ```
 
-Deployments run in `PIPELINE_MODE=simulated` by default, clearly labelled in both
-the UI and the API response. Set `PIPELINE_MODE=live` plus the GitHub/Vercel
-tokens to create real repositories and deployments.
+Local development defaults to `PIPELINE_MODE=simulated`, clearly labelled in both
+the UI and the API response. Production `render.yaml` uses `PIPELINE_MODE=live`;
+without GitHub/Vercel tokens the API reports an honest `not_configured` status
+rather than fabricating a deployment. Set the tokens and an owner allowlist to
+create real repositories and deployments.
 
 ### Create the first admin (never through public signup)
 
@@ -117,8 +119,20 @@ docker run --rm -p 10000:10000 \
   -e FIRST_ADMIN_EMAIL="owner@example.com" \
   -e FIRST_ADMIN_PASSWORD="A_LONG_RANDOM_INITIAL_PASSWORD" \
   -e WEB_ORIGIN=https://your-app.example \
+  -e APP_BASE_URL=https://your-app.example \
+  -e RESEND_API_KEY="YOUR_RESEND_KEY" \
+  -e RESEND_FROM_EMAIL="A.R.M.X AI <no-reply@your-verified-domain>" \
+  -e RESEND_WEBHOOK_SECRET="YOUR_WHSEC_SECRET" \
+  -e PIPELINE_MODE=live \
   armx
 ```
+
+Transactional authentication email uses the official Resend REST API only; **no
+SMTP configuration is required**. Fill `APP_BASE_URL`, `RESEND_API_KEY`,
+`RESEND_FROM_EMAIL` and `RESEND_WEBHOOK_SECRET` as server-side secrets, verify a
+custom sending domain and configure the signed delivery webhook by following
+[docs/RESEND_SETUP.md](docs/RESEND_SETUP.md). For initial testing Resend's
+`onboarding@resend.dev` sender works only for the account owner's address.
 
 For a public deployment, replace `WEB_ORIGIN` with the actual HTTPS origin and
 publish the mapped port through your host's TLS proxy. The example above is for
@@ -139,9 +153,10 @@ for secret rotation, backups and restore checks.
 |---|---|---|
 | Chat / planning | offline planner (labelled) | `GROQ_API_KEY` + `LLM_SECRETS_KEY`; add/fail over routes in Admin → Models |
 | Tool authorisation, approvals, audit | **fully live** | — |
-| Auth (argon2, rotating refresh, reset, Google OIDC) | **fully live** | SMTP for real reset mail; `GOOGLE_*` for OIDC |
+| Auth (argon2id, HttpOnly cookies, CSRF, rotating sessions, reset/verification, Google OIDC) | **fully live** | Resend REST + `APP_BASE_URL` for real email; `GOOGLE_*` for OIDC |
+| Transactional auth email | explicit `not_configured` locally; `accepted` ≠ `delivered` | `RESEND_*`, verified sender, signed delivery webhook |
 | Site generation + design lint + preview | **fully live** | — |
-| Deploy (GitHub + Vercel + Turso) | simulated, clearly flagged | `PIPELINE_MODE=live` + tokens + allowlist |
+| Deploy (GitHub + Vercel + Turso) | local simulation clearly flagged; production `live` reports `not_configured` when credentials are absent | tokens + owner allowlist + provider-confirmed `READY` |
 | Smart home | reports "not configured" honestly | `HOME_ASSISTANT_URL/TOKEN` |
 | Web search | reports "not configured" | `SEARCH_PROVIDER` + key |
 | Read-only mail | reports "not configured" | `IMAP_*` |
@@ -150,9 +165,12 @@ for secret rotation, backups and restore checks.
 | Linked devices, calls, app launch | **API + Android client foundation live**; host execution remains platform-specific | pair a device |
 | Native app (Flutter) | Android source in `app/`; desktop runners are a staged release target | `flutter pub get && flutter run` |
 
-The web background uses the MIT-licensed `cmatrix` browser canvas package rather
-than a CSS imitation. Continuous animation is disabled when the operating system
-requests reduced motion.
+The web background streams the original GPL-3.0 `cmatrix` executable through an
+isolated PTY over authenticated WebSocket/SSE when the binary is available. If
+it is not installed, the UI reports that honestly and falls back to the vendored
+MIT-licensed JavaScript port — it never claims the binary ran. Continuous
+animation is disabled when the operating system requests reduced motion, and
+speed/density/opacity/enable controls are stored as database-backed preferences.
 
 Nothing silently pretends to work: configured LLM routes are shown as
 **unverified** until a real completion succeeds, failed routes are degraded and

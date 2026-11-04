@@ -39,8 +39,21 @@ def get_adapter() -> LLMAdapter:
     return _adapters[key]
 
 
-def get_routing_adapter(db: AsyncSession) -> RoutingAdapter:
-    return RoutingAdapter(db)
+def get_routing_adapter(
+    db: AsyncSession,
+    *,
+    user_id: str = "",
+    conversation_id: str = "",
+    request_id: str = "",
+    model_override: str | None = None,
+) -> RoutingAdapter:
+    return RoutingAdapter(
+        db,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        request_id=request_id,
+        model_override=model_override,
+    )
 
 
 def provider_status() -> dict[str, object]:

@@ -104,28 +104,38 @@ async def web_deploy(ctx: ToolContext, payload: WebDeployInput) -> ToolResult:
         with_database=payload.with_database,
     )
 
+    from app.core.db import utcnow
+
     project.repo_owner = result.owner
-    project.repo_full_name = f"{result.owner}/{result.repo}"
-    project.repo_url = result.repo_url
+    project.repo_full_name = f"{result.owner}/{result.repo}" if result.repo else ""
+    # Only a provider-confirmed success may populate a public URL/repo.
+    project.repo_url = result.repo_url if result.ok else ""
     project.repo_is_platform_owned = result.repo_is_platform_owned
     project.vercel_project = result.vercel_project
     project.vercel_url = result.url if result.ok else ""
     project.deploy_status = result.status
     project.turso_db_ref = result.turso_db
-    project.status = "deployed" if result.ok else "failed"
+    project.deployment_id = result.deployment_id
+    project.deploy_provider = "vercel" if result.ok and result.deployment_id else ""
+    project.deploy_confirmed_at = utcnow() if result.ok else None
+    project.deploy_message = result.error or "" if not result.ok else "Provider confirmed READY"
+    project.simulated = result.simulated
+    project.status = "deployed" if result.ok else "not_configured" if result.simulated else "failed"
     await ctx.db.commit()
 
     if not result.ok:
-        return ToolResult(ok=False, data=result.as_dict(), error=result.error or "Deployment failed")
+        return ToolResult(
+            ok=False,
+            data=result.as_dict(),
+            error=result.error or "Deployment failed; no provider confirmed success.",
+        )
 
-    message = f"'{project.name}' is live at {result.url}."
+    message = f"'{project.name}' is live at {result.url}. Vercel confirmed state {result.status}."
     if result.repo_is_platform_owned:
         message += (
             f" No GitHub account was connected, so it was pushed to the platform account "
             f"({result.repo_url}) - you can connect your own account and redeploy any time."
         )
-    if result.simulated:
-        message += " (simulated pipeline: no real repository or deployment was created.)"
     return ToolResult(ok=True, data=result.as_dict(), message=message)
 
 

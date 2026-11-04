@@ -117,6 +117,9 @@ async def test_forgot_password_does_not_leak_account_existence(client):
 
 
 async def test_me_requires_valid_token(client, auth_headers):
+    # Signup sets an HttpOnly cookie in addition to returning legacy bearer
+    # tokens. Clear browser state to exercise the unauthenticated path.
+    client.cookies.clear()
     assert (await client.get("/api/auth/me")).status_code == 401
     assert (await client.get("/api/auth/me", headers={"Authorization": "Bearer nope"})).status_code == 401
     ok = await client.get("/api/auth/me", headers=auth_headers)

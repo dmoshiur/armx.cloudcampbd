@@ -1,3 +1,4 @@
+from app.models.email import EmailDelivery, EmailDeliveryEvent
 from app.models.device import (
     DeviceAppUsage,
     DeviceCommand,
@@ -19,14 +20,19 @@ from app.models.platform import (
     IntegrationConnection,
     LLMModelConfig,
     LLMProvider,
+    LLMRequestLog,
+    MemoryItem,
     Message,
+    MessageFeedback,
     MessagingProfile,
+    ProjectVersion,
     RateLimitCounter,
     SearchLog,
     SystemFlag,
     Ticket,
     ToolDefinition,
     ToolUserOverride,
+    UserPreference,
 )
 from app.models.user import (
     EmailVerificationToken,
@@ -68,4 +74,11 @@ __all__ = [
     "ChatRun",
     "RateLimitCounter",
     "SearchLog",
+    "UserPreference",
+    "MemoryItem",
+    "MessageFeedback",
+    "LLMRequestLog",
+    "ProjectVersion",
+    "EmailDelivery",
+    "EmailDeliveryEvent",
 ]

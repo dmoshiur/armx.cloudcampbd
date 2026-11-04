@@ -1,9 +1,10 @@
 "use client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useState, type ReactNode } from "react";
+import { PreferencesProvider } from "@/lib/preferences";
 
-export function Providers({ children }: { children: React.ReactNode }) {
+export function Providers({ children }: { children: ReactNode }) {
   const [client] = useState(
     () =>
       new QueryClient({
@@ -13,13 +14,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
       }),
   );
 
-  useEffect(() => {
-    // Restore the saved theme without a flash of the wrong palette.
-    const saved = localStorage.getItem("armx.theme");
-    const root = document.documentElement;
-    root.classList.remove("dark", "light");
-    root.classList.add(saved === "light" ? "light" : "dark");
-  }, []);
-
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={client}>
+      <PreferencesProvider>{children}</PreferencesProvider>
+    </QueryClientProvider>
+  );
 }

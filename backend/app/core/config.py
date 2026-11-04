@@ -41,7 +41,9 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     # Public origin of the web app (used for reset links + CORS).
+    # APP_BASE_URL takes precedence for absolute links in transactional email.
     WEB_ORIGIN: str = "http://localhost:3000"
+    APP_BASE_URL: str = ""
     CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     # --- database ----------------------------------------------------------
@@ -65,10 +67,16 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_TTL_MINUTES: int = 15
     REFRESH_TOKEN_TTL_DAYS: int = 30
-    PASSWORD_RESET_TTL_MINUTES: int = 20
+    SESSION_REFRESH_TTL_HOURS: int = 12  # "remember me" off: short browser session
+    PASSWORD_RESET_TTL_MINUTES: int = 15
+    EMAIL_VERIFICATION_TTL_HOURS: int = 24
+    EMAIL_RESEND_COOLDOWN_SECONDS: int = 60
     LOGIN_MAX_ATTEMPTS: int = 5
     LOGIN_LOCKOUT_MINUTES: int = 15
     REQUIRE_EMAIL_VERIFICATION: bool = False
+    CSRF_COOKIE_NAME: str = "armx_csrf"
+    ACCESS_COOKIE_NAME: str = "armx_access"
+    REFRESH_COOKIE_NAME: str = "armx_refresh"
 
     # --- secure first-run bootstrap ---------------------------------------
     # Environment seeding is one-shot: it creates an admin only when no admin
@@ -106,7 +114,18 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
 
-    # --- email -------------------------------------------------------------
+    # --- transactional email: Resend REST API only -------------------------
+    # SMTP is intentionally not used for authentication email. All secrets stay
+    # server-side; the frontend only sees capability flags, never these values.
+    RESEND_API_KEY: str = ""
+    RESEND_FROM_EMAIL: str = ""
+    RESEND_WEBHOOK_SECRET: str = ""
+    RESEND_API_URL: str = "https://api.resend.com/emails"
+    RESEND_MAX_ATTEMPTS: int = 3
+    RESEND_TIMEOUT_SECONDS: float = 10.0
+
+    # Legacy SMTP_* values are accepted but unused; kept so an existing Render
+    # environment does not fail on unknown variables (BaseSettings ignores extra).
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
@@ -203,6 +222,15 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
     @property
+    def auth_base_url(self) -> str:
+        """Absolute public origin for recovery/verification links."""
+        return (self.APP_BASE_URL or self.WEB_ORIGIN).rstrip("/")
+
+    @property
+    def resend_configured(self) -> bool:
+        return bool(self.RESEND_API_KEY and self.RESEND_FROM_EMAIL)
+
+    @property
     def anthropic_key_pool(self) -> list[str]:
         keys = [k.strip() for k in self.ANTHROPIC_API_KEYS.split(",") if k.strip()]
         if self.ANTHROPIC_API_KEY and self.ANTHROPIC_API_KEY not in keys:
@@ -276,7 +304,13 @@ class Settings(BaseSettings):
             "JWT_SECRET": self.JWT_SECRET,
             "DATABASE": self.effective_database_url,
             "LLM_SECRETS_KEY": self.LLM_SECRETS_KEY,
+            "RESEND_API_KEY": self.RESEND_API_KEY,
+            "RESEND_FROM_EMAIL": self.RESEND_FROM_EMAIL,
         }
+        if not self.auth_base_url.startswith("https://"):
+            raise RuntimeError(
+                "APP_BASE_URL (or WEB_ORIGIN) must be an absolute https:// URL in production"
+            )
         if self.REQUIRE_TURSO_IN_PRODUCTION and not self.turso_enabled:
             raise RuntimeError(
                 "Turso is required: set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN"
