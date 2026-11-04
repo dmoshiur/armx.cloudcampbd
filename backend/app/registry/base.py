@@ -85,6 +85,8 @@ class ToolSpec:
     rate_limit_per_minute: int = 30
     dry_run_supported: bool = False
     category: str = "general"
+    # Bounded execution budget. The gateway enforces this for every handler.
+    timeout_seconds: float = 20.0
     # Optional dynamic risk: e.g. messaging is MEDIUM for a pre-approved contact and
     # HIGH for a new one. The gateway uses this for the approval decision.
     risk_resolver: RiskResolver | None = None
@@ -93,6 +95,19 @@ class ToolSpec:
         schema = self.input_model.model_json_schema()
         schema.pop("title", None)
         return schema
+
+    def output_schema(self) -> dict[str, Any]:
+        """Every tool returns the same envelope; no fabricated success shape."""
+        return {
+            "type": "object",
+            "required": ["ok"],
+            "properties": {
+                "ok": {"type": "boolean", "description": "Whether the handler actually executed"},
+                "data": {"type": "object", "description": "Provider/tool-specific result"},
+                "message": {"type": "string", "description": "Human-readable summary"},
+                "error": {"type": "string", "description": "Actionable failure reason"},
+            },
+        }
 
     def llm_schema(self) -> dict[str, Any]:
         return {"name": self.name, "description": self.description, "input_schema": self.json_schema()}

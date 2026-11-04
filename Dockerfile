@@ -29,6 +29,7 @@ LABEL org.opencontainers.image.source="https://github.com/dmoshiur/armx.cloudcam
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        ca-certificates gettext-base libatomic1 libstdc++6 nginx supervisor \
+       cmatrix ncurses-term \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 armx \
     && useradd --uid 10001 --gid armx --home-dir /app --no-create-home --shell /usr/sbin/nologin armx
@@ -43,6 +44,8 @@ COPY --from=web-builder --chown=armx:armx /app/public ./web/public/
 COPY --chown=armx:armx backend/ ./backend/
 # Backend project linting also reads the repository's shared token source.
 COPY --chown=armx:armx design/tokens.json ./design/tokens.json
+# GPL-3.0 source offer for the original cmatrix binary installed above.
+COPY --chown=armx:armx third_party/cmatrix/NOTICE.md ./third_party/cmatrix/NOTICE.md
 COPY deploy/runtime/ ./deploy/runtime/
 RUN chmod 0755 /app/deploy/runtime/entrypoint.sh \
     && mkdir -p /data/workspace /data/media \

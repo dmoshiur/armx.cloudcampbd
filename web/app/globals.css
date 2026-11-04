@@ -2,76 +2,159 @@
 @tailwind components;
 @tailwind utilities;
 
-/* CMatrix semantic surfaces. Dark is the default; light preserves the green
-   identity while meeting text contrast requirements. */
+/* A.R.M.X AI design system: deep ink / emerald, controlled glow. */
 :root,
 html.dark {
-  --bg: 2 9 4;             /* ink     #020904 */
-  --surface: 6 18 10;      /* matrix  #06120A */
+  --bg: 2 9 4;
+  --surface: 6 18 10;
+  --surface-2: 9 26 15;
   --border: 23 77 36;
   --text: 215 255 225;
   --text-muted: 117 168 129;
+  --accent: 0 255 65;
   color-scheme: dark;
 }
 
 html.light {
   --bg: 236 255 240;
   --surface: 255 255 255;
+  --surface-2: 245 255 248;
   --border: 168 221 180;
   --text: 2 9 4;
   --text-muted: 56 107 69;
+  --accent: 0 128 48;
   color-scheme: light;
 }
 
 html,
 body {
   height: 100%;
+  overflow-x: hidden;
 }
 
 body {
   @apply bg-bg text-fg antialiased;
-  /* No webfont CDN: Inter when present on the device, system grotesk otherwise. */
   font-family: Inter, "Inter var", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   text-rendering: optimizeLegibility;
-  background-image: radial-gradient(circle at 50% -20%, rgb(0 255 65 / 0.08), transparent 45%);
 }
 
+/* ------------------------------------------------------------------ shell */
+.armx-root {
+  height: 100dvh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.armx-frame {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+}
+
+.armx-content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.armx-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.armx-main > * {
+  min-width: 0;
+}
+
+.armx-glass {
+  background: linear-gradient(180deg, rgb(var(--surface) / 0.9), rgb(var(--surface) / 0.72));
+  border: 1px solid rgb(var(--border) / 0.65);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 18px 45px rgb(0 0 0 / 0.28);
+}
+
+.armx-glow {
+  box-shadow: 0 0 0 1px rgb(0 255 65 / 0.08), 0 12px 34px rgb(0 255 65 / 0.06);
+}
+
+/* --------------------------------------------------------------- cmatrix */
 .cmatrix-backdrop {
   position: fixed;
   inset: 0;
   z-index: 0;
   overflow: hidden;
   pointer-events: none;
-  background:
-    radial-gradient(circle at 50% -10%, rgb(15 255 120 / 0.14), transparent 38%),
-    #010503;
+  background: radial-gradient(circle at 50% -10%, rgb(15 255 120 / 0.12), transparent 42%), #010503;
 }
 
 .cmatrix-canvas {
   display: block;
-  width: 100%;
-  height: 100%;
-  opacity: 0.24;
-  filter: saturate(1.12) contrast(1.08);
+  width: 100vw;
+  height: 100dvh;
+  filter: saturate(1.1) contrast(1.05);
+  transition: opacity 220ms ease;
 }
 
 .cmatrix-vignette {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(circle at 56% 25%, transparent 0 24%, rgb(0 4 2 / 0.32) 66%, rgb(0 3 2 / 0.9) 100%),
-    linear-gradient(180deg, rgb(0 8 4 / 0.08), rgb(0 3 2 / 0.7));
+    radial-gradient(circle at 55% 22%, transparent 0 22%, rgb(0 4 2 / 0.38) 68%, rgb(0 3 2 / 0.9) 100%),
+    linear-gradient(180deg, rgb(0 8 4 / 0.06), rgb(0 3 2 / 0.72));
 }
 
-.cmatrix-backdrop[data-reduced-motion="true"]::before {
+.cmatrix-backdrop[data-reduced-motion="true"]::before,
+.cmatrix-backdrop[data-matrix-mode="reduced"]::before,
+.cmatrix-backdrop[data-matrix-mode="disabled"]::before {
   content: "";
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(circle at 50% 5%, rgb(0 255 106 / 0.12), transparent 38%),
-    linear-gradient(rgb(0 255 106 / 0.018) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(0 255 106 / 0.018) 1px, transparent 1px);
+    radial-gradient(circle at 50% 5%, rgb(0 255 106 / 0.1), transparent 38%),
+    linear-gradient(rgb(0 255 106 / 0.016) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(0 255 106 / 0.016) 1px, transparent 1px);
   background-size: auto, 44px 44px, 44px 44px;
+}
+
+.cmatrix-status {
+  position: absolute;
+  right: 12px;
+  bottom: calc(10px + env(safe-area-inset-bottom));
+  display: none;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgb(var(--border) / 0.7);
+  border-radius: 999px;
+  background: rgb(1 7 4 / 0.72);
+  padding: 4px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: rgb(var(--text-muted));
+  pointer-events: none;
+}
+
+@media (min-width: 1024px) {
+  .cmatrix-status { display: inline-flex; }
+}
+
+.cmatrix-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgb(var(--text-muted));
+}
+.cmatrix-status-dot.is-live {
+  background: #12f77c;
+  box-shadow: 0 0 8px #12f77c;
 }
 
 body > :not(.cmatrix-backdrop) {
@@ -79,55 +162,146 @@ body > :not(.cmatrix-backdrop) {
   z-index: 1;
 }
 
-/* One visible focus treatment everywhere. */
+/* --------------------------------------------------------------- auth */
+.auth-page {
+  position: relative;
+  min-height: 100dvh;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% -12%, rgb(0 255 65 / 0.09), transparent 42%),
+    radial-gradient(circle at 85% 90%, rgb(0 184 46 / 0.045), transparent 35%),
+    #010503;
+}
+
+.auth-grid {
+  position: absolute;
+  inset: 0;
+  opacity: 0.35;
+  background-image:
+    linear-gradient(rgb(0 255 65 / 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(0 255 65 / 0.025) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(circle at 50% 35%, black, transparent 72%);
+}
+
+.auth-glow {
+  position: absolute;
+  left: 50%;
+  top: 8%;
+  width: min(560px, 90vw);
+  height: 280px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: rgb(0 255 65 / 0.055);
+  filter: blur(80px);
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------- primitives */
 :focus-visible {
-  outline: 2px solid theme("colors.accent");
+  outline: 2px solid rgb(var(--accent));
   outline-offset: 2px;
   border-radius: 8px;
 }
 
 ::selection {
-  background: theme("colors.accent");
-  color: theme("colors.ink");
+  background: rgb(var(--accent));
+  color: rgb(var(--bg));
 }
 
-/* Purposeful motion only. */
+::webkit-scrollbar { width: 10px; height: 10px; }
+::webkit-scrollbar-thumb { background: rgb(var(--border) / 0.8); border-radius: 999px; }
+* { scrollbar-width: thin; scrollbar-color: rgb(var(--border) / 0.8) transparent; }
+
+@keyframes armx-fade-up {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: none; }
+}
+.animate-fade-up { animation: armx-fade-up 200ms cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+
+@keyframes armx-pulse-soft {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+.animate-pulse-soft { animation: armx-pulse-soft 1.4s ease-in-out infinite; }
+
+/* --------------------------------------------------------------- markdown */
+.armx-markdown { overflow-wrap: anywhere; }
+.armx-markdown > * + * { margin-top: 0.75rem; }
+.armx-markdown h1, .armx-markdown h2, .armx-markdown h3 {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: rgb(var(--text));
+  margin-top: 1.1rem;
+}
+.armx-markdown h1 { font-size: 1.35rem; }
+.armx-markdown h2 { font-size: 1.15rem; }
+.armx-markdown h3 { font-size: 1rem; }
+.armx-markdown p { line-height: 1.65; }
+.armx-markdown ul, .armx-markdown ol { padding-left: 1.25rem; line-height: 1.65; }
+.armx-markdown ul { list-style: disc; }
+.armx-markdown ol { list-style: decimal; }
+.armx-markdown a { color: rgb(var(--accent)); text-decoration: underline; text-underline-offset: 2px; }
+.armx-markdown blockquote {
+  border-left: 2px solid rgb(var(--accent) / 0.6);
+  padding-left: 0.9rem;
+  color: rgb(var(--text-muted));
+}
+.armx-markdown code:not(pre code) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  border: 1px solid rgb(var(--border) / 0.6);
+  border-radius: 5px;
+  padding: 0.1rem 0.35rem;
+  background: rgb(var(--bg) / 0.8);
+}
+.armx-code {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgb(var(--border) / 0.7);
+  border-radius: 10px;
+  background: rgb(1 8 4 / 0.92);
+}
+.armx-code pre {
+  overflow-x: auto;
+  padding: 0.9rem 1rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+.armx-code .tok-key { color: #7ee7a8; }
+.armx-code .tok-str { color: #ffd58a; }
+.armx-code .tok-num { color: #8fd0ff; }
+.armx-code .tok-com { color: #6c8f76; font-style: italic; }
+
+/* --------------------------------------------------------------- composer */
+.armx-composer {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  flex: 0 0 auto;
+  padding-bottom: env(safe-area-inset-bottom);
+  border-top: 1px solid rgb(var(--border) / 0.7);
+  background: linear-gradient(180deg, rgb(var(--surface) / 0.86), rgb(var(--surface) / 0.98));
+  backdrop-filter: blur(20px);
+}
+
+.armx-drop-active {
+  outline: 2px dashed rgb(var(--accent));
+  outline-offset: -6px;
+  background: rgb(0 255 65 / 0.04);
+}
+
+.armx-scroll-anchor {
+  height: 1px;
+  scroll-margin-bottom: 1.5rem;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  *, *::before, *::after {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
-}
-
-/* Thin, unobtrusive scrollbars that work in both themes. */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: rgb(var(--border)) transparent;
-}
-*::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-*::-webkit-scrollbar-thumb {
-  background: rgb(var(--border));
-  border-radius: 999px;
-}
-
-@keyframes armx-fade-up {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-.animate-fade-up {
-  animation: armx-fade-up 180ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
 }

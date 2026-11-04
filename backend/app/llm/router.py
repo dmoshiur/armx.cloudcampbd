@@ -8,20 +8,21 @@ import secrets
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.db import as_utc
+from app.core.db import as_utc, utcnow
+from app.core.errors import classify_provider_error
 from app.core.net import validate_provider_url
 from app.core.secrets import decrypt_secret, encrypt_secret, secret_hint
 from app.llm.base import FinishReason, LLMAdapter, LLMMessage, LLMResponse
 from app.llm.claude import ClaudeAdapter
 from app.llm.mock import MockAdapter
 from app.llm.openai import OpenAIAdapter
-from app.models import LLMModelConfig, LLMProvider
+from app.models import LLMModelConfig, LLMProvider, LLMRequestLog
 
 log = logging.getLogger(__name__)
 
@@ -169,41 +170,89 @@ async def _record_result(
 
 
 class RoutingAdapter:
-    """Select a healthy model for each completion and fail over transparently."""
+    """Select a healthy model for each completion and fail over transparently.
+
+    The exact provider/model that produced a reply is always returned; a
+    ``fallback_reason`` is set when the labelled offline planner is used.
+    """
 
     name = "router"
     model = "balanced-pool"
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: str = "",
+        conversation_id: str = "",
+        request_id: str = "",
+        model_override: str | None = None,
+    ) -> None:
         self.db = db
+        self.user_id = user_id
+        self.conversation_id = conversation_id
+        self.request_id = request_id
+        self.model_override = model_override
 
-    async def complete(
-        self, messages: list[LLMMessage], tool_schemas: list[dict[str, Any]]
+    async def _log(
+        self,
+        candidate: Candidate | None,
+        response: LLMResponse,
+        started: float,
+        *,
+        streamed: bool = False,
+    ) -> None:
+        classified = classify_provider_error(response.error) if not response.ok else None
+        self.db.add(
+            LLMRequestLog(
+                user_id=self.user_id,
+                conversation_id=self.conversation_id,
+                request_id=self.request_id,
+                provider=response.provider or (candidate.provider_name if candidate else "mock"),
+                model=response.model or (candidate.model_id if candidate else "armx-offline-planner"),
+                status="ok" if response.ok else "error",
+                error_code=response.error_code or (classified.code if classified else ""),
+                error=(response.error or "")[:500],
+                latency_ms=int((time.monotonic() - started) * 1000),
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens,
+                streamed=streamed,
+            )
+        )
+        await self.db.flush()
+
+    async def _attempt(
+        self,
+        candidate: Candidate,
+        messages: list[LLMMessage],
+        tool_schemas: list[dict[str, Any]],
+        *,
+        on_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
-        candidates = await load_candidates(self.db)
-        errors: list[str] = []
-        deadline = time.monotonic() + settings.LLM_ROUTE_TIMEOUT_SECONDS
+        await validate_provider_url(candidate.base_url)
+        adapter = _adapter(candidate)
+        schemas = tool_schemas if candidate.supports_tools else []
+        if on_delta is not None:
+            return await adapter.stream(messages, schemas, on_delta)
+        return await adapter.complete(messages, schemas)
 
-        for candidate in candidates:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                errors.append(
-                    "routing deadline exhausted before all candidates were attempted"
-                )
-                break
-
-            async def attempt() -> LLMResponse:
-                # Resolve immediately before a server-side request to reduce
-                # DNS-rebinding/SSRF exposure from custom endpoints.
-                await validate_provider_url(candidate.base_url)
-                adapter = _adapter(candidate)
-                return await adapter.complete(
-                    messages, tool_schemas if candidate.supports_tools else []
-                )
-
-            attempt_timeout = min(settings.LLM_TIMEOUT_SECONDS, remaining)
+    async def _candidate_response(
+        self,
+        candidate: Candidate,
+        messages: list[LLMMessage],
+        tool_schemas: list[dict[str, Any]],
+        attempt_timeout: float,
+        *,
+        on_delta: Callable[[str], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
+        started = time.monotonic()
+        # One bounded retry for retryable provider failures (429/5xx/timeouts).
+        for retry in range(2):
             try:
-                response = await asyncio.wait_for(attempt(), timeout=attempt_timeout)
+                response = await asyncio.wait_for(
+                    self._attempt(candidate, messages, tool_schemas, on_delta=on_delta),
+                    timeout=attempt_timeout,
+                )
             except TimeoutError:
                 response = LLMResponse(
                     finish_reason=FinishReason.ERROR,
@@ -213,9 +262,6 @@ class RoutingAdapter:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                # Provider adapters are an external fault boundary. Convert
-                # malformed payloads, networking failures and key errors into a
-                # routable failure rather than turning the whole chat into a 500.
                 log.exception(
                     "Unexpected failure from LLM route %s/%s",
                     candidate.provider_name,
@@ -226,11 +272,43 @@ class RoutingAdapter:
                     error=f"{type(exc).__name__}: {exc}",
                     model=candidate.model_id,
                 )
-
             response.provider = candidate.provider_name
             if not response.model:
                 response.model = candidate.model_id
-            await _record_result(self.db, candidate, response)
+            classified = classify_provider_error(response.error) if not response.ok else None
+            if classified and not response.error_code:
+                response.error_code = classified.code
+            if response.ok or retry == 1 or not (classified and classified.retryable):
+                break
+            await asyncio.sleep(0.4 * (retry + 1))
+        await _record_result(self.db, candidate, response)
+        await self._log(candidate, response, started, streamed=bool(response.streamed))
+        return response
+
+    def _candidates_sync(self, candidates: list[Candidate]) -> list[Candidate]:
+        if self.model_override:
+            exact = [c for c in candidates if c.model_id == self.model_override]
+            if exact:
+                return exact
+        return candidates
+
+    async def complete(
+        self, messages: list[LLMMessage], tool_schemas: list[dict[str, Any]]
+    ) -> LLMResponse:
+        candidates = self._candidates_sync(await load_candidates(self.db))
+        errors: list[str] = []
+        deadline = time.monotonic() + settings.LLM_ROUTE_TIMEOUT_SECONDS
+
+        for candidate in candidates:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                errors.append(
+                    "routing deadline exhausted before all candidates were attempted"
+                )
+                break
+            response = await self._candidate_response(
+                candidate, messages, tool_schemas, min(settings.LLM_TIMEOUT_SECONDS, remaining)
+            )
             if response.ok:
                 return response
             errors.append(
@@ -241,11 +319,60 @@ class RoutingAdapter:
         fallback = MockAdapter()
         response = await fallback.complete(messages, tool_schemas)
         response.provider = fallback.name
+        response.fallback_reason = "; ".join(errors)[:800] if errors else "no live model route is enabled"
+        await self._log(None, response, time.monotonic() - 0.001)
         if errors:
             log.error(
                 "All live LLM routes failed; using labelled offline planner: %s",
                 " | ".join(errors)[:1500],
             )
+        return response
+
+    async def stream(
+        self,
+        messages: list[LLMMessage],
+        tool_schemas: list[dict[str, Any]],
+        on_delta: Callable[[str], Awaitable[None]],
+    ) -> LLMResponse:
+        """Stream only from a route that actually succeeds.
+
+        Candidate deltas are buffered locally: a route that fails halfway never
+        leaks partial text into the user's message. The successful buffer is
+        flushed in order, then the offline planner's clearly labelled reply is
+        used if every live route failed.
+        """
+        candidates = self._candidates_sync(await load_candidates(self.db))
+        errors: list[str] = []
+        deadline = time.monotonic() + settings.LLM_ROUTE_TIMEOUT_SECONDS
+
+        for candidate in candidates:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                errors.append("routing deadline exhausted before all candidates were attempted")
+                break
+            buffer: list[str] = []
+
+            async def collect(piece: str) -> None:
+                buffer.append(piece)
+
+            response = await self._candidate_response(
+                candidate,
+                messages,
+                tool_schemas,
+                min(settings.LLM_TIMEOUT_SECONDS, remaining),
+                on_delta=collect,
+            )
+            if response.ok:
+                for piece in buffer:
+                    await on_delta(piece)
+                return response
+            errors.append(f"{candidate.provider_name}/{candidate.model_id}: {response.error}")
+
+        fallback = MockAdapter()
+        response = await fallback.stream(messages, tool_schemas, on_delta)
+        response.provider = fallback.name
+        response.fallback_reason = "; ".join(errors)[:800] if errors else "no live model route is enabled"
+        await self._log(None, response, time.monotonic() - 0.001)
         return response
 
 
@@ -349,9 +476,31 @@ async def provider_status_async(db: AsyncSession) -> dict[str, Any]:
             .limit(1)
         )
     ).first()
+    model_rows = (
+        await db.execute(
+            select(LLMModelConfig, LLMProvider)
+            .join(LLMProvider, LLMProvider.id == LLMModelConfig.provider_id)
+            .where(LLMModelConfig.enabled.is_(True), LLMProvider.enabled.is_(True))
+            .order_by(LLMModelConfig.priority.asc(), LLMModelConfig.weight.desc())
+        )
+    ).all()
     return {
         "provider": first[1].name if first else "mock",
         "model": first[0].model_id if first else "offline-rules-v1",
+        "models": [
+            {
+                "id": m.id,
+                "provider": p.name,
+                "model": m.model_id,
+                "display_name": m.display_name or m.model_id,
+                "status": m.status,
+                "supports_tools": m.supports_tools,
+                "priority": m.priority,
+                "last_error": m.last_error,
+                "last_success_at": m.last_success_at.isoformat() if m.last_success_at else None,
+            }
+            for m, p in model_rows
+        ],
         # `live` means configured/enabled, not that a completion probe passed.
         # Callers must use `ready`/`readiness` for an honest health indicator.
         "live": bool(first),

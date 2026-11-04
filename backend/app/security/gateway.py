@@ -12,6 +12,7 @@ Invariants enforced here (and nowhere else):
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -223,15 +224,27 @@ async def consume_approval(
     if approval.user_id != user.id:
         raise GatewayError("approval_foreign", "Approval belongs to another account")
     if approval.session_id != session_id:
-        raise GatewayError("approval_wrong_session", "Approval was issued for a different session")
+        raise GatewayError(
+            "approval_wrong_session",
+            "Approval was issued for a different sign-in session. Request a new approval to retry the same action.",
+            extra={"can_retry": True},
+        )
     if approval.tool_name != spec.name:
         raise GatewayError("approval_wrong_tool", "Approval is for a different tool")
     if approval.status != ApprovalStatus.PENDING.value:
-        raise GatewayError("approval_reused", f"Approval already {approval.status}")
+        raise GatewayError(
+            "approval_reused",
+            f"Approval already {approval.status}; it was never executed twice.",
+            extra={"can_retry": approval.status == ApprovalStatus.EXPIRED.value},
+        )
     if as_utc(approval.expires_at) < datetime.now(timezone.utc):
         approval.status = ApprovalStatus.EXPIRED.value
         await db.commit()
-        raise GatewayError("approval_expired", "Approval expired")
+        raise GatewayError(
+            "approval_expired",
+            "Approval expired before it was used. Nothing was executed; request a new approval.",
+            extra={"can_retry": True},
+        )
 
     expires_at = as_utc(approval.expires_at)
     expected = action_hash(
@@ -256,6 +269,74 @@ async def consume_approval(
     approval.consumed_at = datetime.now(timezone.utc)
     await db.commit()
     return approval
+
+
+async def retry_approval(
+    db: AsyncSession,
+    *,
+    user: User,
+    session_id: str,
+    spec: ToolSpec,
+    args: dict[str, Any],
+    run,
+) -> Approval:
+    """Replace an expired/session-mismatched approval with a fresh one.
+
+    The paused tool call is unchanged and the old record is explicitly expired,
+    so there is no silent reuse and no duplicate execution path.
+    """
+    old_id = run.pending_approval_id
+    if old_id:
+        old = await db.get(Approval, old_id)
+        if old is not None and old.user_id == user.id and old.status == ApprovalStatus.PENDING.value:
+            old.status = ApprovalStatus.EXPIRED.value
+            await audit(
+                db,
+                action="approval.replaced",
+                actor=user,
+                tool_name=old.tool_name,
+                risk_tier=old.risk_tier,
+                status="expired",
+                detail={"approval_id": old.id, "reason": "user requested a fresh approval"},
+            )
+    approval = await create_approval(
+        db,
+        user=user,
+        session_id=session_id,
+        spec=spec,
+        args=args,
+        run_id=run.id,
+    )
+    run.status = "awaiting_approval"
+    run.pending_approval_id = approval.id
+    run.stopped = False
+    await db.commit()
+    return approval
+
+
+async def expire_stale_approvals(db: AsyncSession) -> int:
+    """Mark expired approvals and their runs honestly. Used by the worker."""
+    from app.models import ChatRun
+
+    now = datetime.now(timezone.utc)
+    rows = (
+        await db.execute(
+            select(Approval).where(
+                Approval.status == ApprovalStatus.PENDING.value,
+                Approval.expires_at < now,
+            )
+        )
+    ).scalars().all()
+    for approval in rows:
+        approval.status = ApprovalStatus.EXPIRED.value
+        if approval.run_id:
+            run = await db.get(ChatRun, approval.run_id)
+            if run is not None and run.status == "awaiting_approval":
+                run.status = "expired"
+                run.pending_approval_id = None
+    if rows:
+        await db.commit()
+    return len(rows)
 
 
 async def deny_approval(db: AsyncSession, *, approval_id: str, user: User) -> None:
@@ -333,7 +414,14 @@ async def execute(
     )
 
     try:
-        result = await spec.handler(ctx, validated)
+        result = await asyncio.wait_for(
+            spec.handler(ctx, validated), timeout=spec.timeout_seconds
+        )
+    except TimeoutError:
+        result = ToolResult(
+            ok=False,
+            error=f"Tool exceeded its {spec.timeout_seconds:.0f}s execution budget. Nothing is claimed as successful.",
+        )
     except GatewayError:
         raise
     except Exception as exc:  # pragma: no cover - defensive

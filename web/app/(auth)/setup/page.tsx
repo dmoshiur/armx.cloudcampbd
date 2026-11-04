@@ -1,10 +1,10 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { api, ApiError } from "@/lib/api/client";
-import { Button, FieldError, Input, Label } from "@/components/ui/primitives";
+import { describeError, request } from "@/lib/api/client";
+import { AuthCard, AuthLink, Notice, PrimaryButton, TextField } from "@/components/auth/auth-ui";
 
 interface SetupState {
   required: boolean;
@@ -26,7 +26,7 @@ export default function SetupPage() {
 
   const state = useQuery({
     queryKey: ["setup", "status"],
-    queryFn: () => api.get<SetupState>("/setup/status"),
+    queryFn: () => request<SetupState>("/setup/status", { auth: false }),
     retry: false,
   });
 
@@ -43,68 +43,85 @@ export default function SetupPage() {
     }
     setBusy(true);
     try {
-      await api.post("/setup/complete", {
-        setup_token: setupToken,
-        email,
-        display_name: displayName,
-        password,
+      await request("/setup/complete", {
+        method: "POST",
+        auth: false,
+        body: JSON.stringify({
+          setup_token: setupToken,
+          email,
+          display_name: displayName,
+          password,
+        }),
       });
       router.replace("/login?setup=complete");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Setup could not be completed");
+      setError(describeError(err, "complete platform setup"));
     } finally {
       setBusy(false);
     }
   }
 
-  if (state.isLoading) return <p className="text-body text-fgmuted">Checking platform state…</p>;
-  if (state.isError) return <p className="text-body text-danger">Could not read setup status.</p>;
-  if (!state.data?.needs_setup) return <p className="text-body text-fgmuted">Setup is already complete. Redirecting…</p>;
-
+  if (state.isLoading) {
+    return (
+      <AuthCard title="Checking platform state" subtitle="Reading the protected first-boot status…">
+        <div className="flex items-center justify-center gap-3 py-4 text-body text-fgmuted">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-accent border-t-transparent" /> Checking…
+        </div>
+      </AuthCard>
+    );
+  }
+  if (state.isError) {
+    return (
+      <AuthCard title="Setup status unavailable" subtitle={state.error.message} footer={<AuthLink href="/login">Back to sign in</AuthLink>}>
+        <Notice tone="error">Check `/api/health` and the deployment proxy, then refresh this page.</Notice>
+      </AuthCard>
+    );
+  }
+  if (!state.data?.needs_setup) {
+    const complete = state.data?.complete;
+    return (
+      <AuthCard
+        title={complete ? "Setup is already complete" : "Setup is not required"}
+        subtitle={complete ? "An administrator exists; redirecting to sign in." : "This instance is not in a production/staging first-boot state."}
+        footer={<AuthLink href={complete ? "/login?setup=complete" : "/login"}>Continue to sign in →</AuthLink>}
+      >
+        <Notice tone={complete ? "success" : "info"}>
+          {complete
+            ? "This one-time bootstrap route is closed."
+            : "In production, ENV=production or ENV=staging requires one protected admin bootstrap before public use."}
+        </Notice>
+      </AuthCard>
+    );
+  }
   if (!state.data.setup_available) {
     return (
-      <div>
-        <p className="font-mono text-caption uppercase tracking-[0.2em] text-accent">bootstrap locked</p>
-        <h2 className="mt-2 text-h1">Set an initial setup token</h2>
-        <p className="mt-3 text-body text-fgmuted">
-          Add <code className="text-accent">INITIAL_SETUP_TOKEN</code> to Render, redeploy, then reload this page. Use at least 32 random characters.
-          Alternatively set both <code className="text-accent">FIRST_ADMIN_EMAIL</code> and <code className="text-accent">FIRST_ADMIN_PASSWORD</code> for one-shot environment seeding.
-        </p>
-      </div>
+      <AuthCard title="Bootstrap locked" subtitle="Set a protected initial setup token before creating the first administrator." footer={<AuthLink href="/login">Back to sign in</AuthLink>}>
+        <Notice tone="info">
+          Add <code className="font-mono text-accent">INITIAL_SETUP_TOKEN</code> to Render, redeploy, then reload this page. Use at least 32 random characters.
+          {state.data.environment_seed_configured && " An environment seed is configured; restart the service to apply it."}
+        </Notice>
+      </AuthCard>
     );
   }
 
   return (
-    <div>
-      <p className="font-mono text-caption uppercase tracking-[0.2em] text-accent">first secure boot</p>
-      <h2 className="mt-2 text-h1">Create the platform owner</h2>
-      <p className="mt-2 text-body text-fgmuted">
-        This route permanently closes after the first administrator is committed to the database.
-      </p>
-      <form onSubmit={submit} className="mt-6 space-y-4" noValidate>
-        <div>
-          <Label htmlFor="setup-token">Render setup token</Label>
-          <Input id="setup-token" type="password" autoComplete="off" required value={setupToken} onChange={(event) => setSetupToken(event.target.value)} />
-        </div>
-        <div>
-          <Label htmlFor="owner-name">Display name</Label>
-          <Input id="owner-name" required value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
-        </div>
-        <div>
-          <Label htmlFor="owner-email">Owner email</Label>
-          <Input id="owner-email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} />
-        </div>
-        <div>
-          <Label htmlFor="owner-password" hint="10+ characters, uppercase and symbol">Password</Label>
-          <Input id="owner-password" type="password" autoComplete="new-password" required value={password} onChange={(event) => setPassword(event.target.value)} />
-        </div>
-        <div>
-          <Label htmlFor="owner-confirm">Confirm password</Label>
-          <Input id="owner-confirm" type="password" autoComplete="new-password" required value={confirm} onChange={(event) => setConfirm(event.target.value)} />
-          <FieldError>{error}</FieldError>
-        </div>
-        <Button type="submit" className="w-full" loading={busy}>Seal setup and continue</Button>
+    <AuthCard
+      title="Create the platform owner"
+      subtitle="This one-time route permanently closes after the first administrator is committed to the database."
+      footer={<AuthLink href="/login">← Back to sign in</AuthLink>}
+    >
+      {error && <div className="mb-4"><Notice tone="error">{error}</Notice></div>}
+      <form onSubmit={submit} className="space-y-4" noValidate>
+        <TextField id="setup-token" label="Render setup token" type="password" autoComplete="off" value={setupToken} onChange={setSetupToken} hint="At least 32 characters; never shared with the browser bundle" disabled={busy} />
+        <TextField id="owner-name" label="Display name" autoComplete="name" value={displayName} onChange={setDisplayName} disabled={busy} />
+        <TextField id="owner-email" label="Owner email" type="email" autoComplete="email" value={email} onChange={setEmail} disabled={busy} />
+        <TextField id="owner-password" label="Password" type="password" autoComplete="new-password" value={password} onChange={setPassword} hint="10+ characters, uppercase and symbol" disabled={busy} />
+        <TextField id="owner-confirm" label="Confirm password" type="password" autoComplete="new-password" value={confirm} onChange={setConfirm} disabled={busy} />
+        <PrimaryButton busy={busy}>Seal setup and continue</PrimaryButton>
       </form>
-    </div>
+      <p className="mt-4 text-center text-[11px] leading-relaxed text-fgmuted/70">
+        The owner is created with server-side authorization only. No public registration can grant ADMIN.
+      </p>
+    </AuthCard>
   );
 }

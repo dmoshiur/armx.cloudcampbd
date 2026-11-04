@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Awaitable, Callable, Protocol, runtime_checkable
 
 
 class FinishReason(str, enum.Enum):
@@ -45,6 +45,9 @@ class LLMResponse:
     provider: str = ""
     usage: Usage = field(default_factory=Usage)
     raw_stop_reason: str = ""
+    streamed: bool = False
+    fallback_reason: str = ""
+    error_code: str = ""
 
     @property
     def ok(self) -> bool:
@@ -70,6 +73,13 @@ class LLMAdapter(Protocol):
     async def complete(
         self, messages: list[LLMMessage], tool_schemas: list[dict[str, Any]]
     ) -> LLMResponse: ...
+
+
+# Optional streaming contract. ``on_delta`` is called with real provider text
+# chunks; the returned LLMResponse is the authoritative final message (including
+# any tool calls and token usage). Adapters that cannot stream declare
+# ``streamed=False`` on the response rather than pretending they did.
+StreamDelta = Callable[[str], Awaitable[None]]
 
 
 class LLMError(Exception):

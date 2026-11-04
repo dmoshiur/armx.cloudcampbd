@@ -1,4 +1,15 @@
-from app.api import admin, assistant, auth, device_management, devices, llm_admin, misc, setup
+from app.api import (
+    admin,
+    assistant,
+    auth,
+    device_management,
+    devices,
+    llm_admin,
+    matrix,
+    misc,
+    setup,
+    workspace,
+)
 
 __all__ = [
     "admin",
@@ -7,6 +18,8 @@ __all__ = [
     "device_management",
     "devices",
     "llm_admin",
+    "matrix",
     "misc",
     "setup",
+    "workspace",
 ]

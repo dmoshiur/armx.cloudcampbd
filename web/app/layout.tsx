@@ -24,8 +24,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
       <body className="min-h-full font-sans">
-        <CMatrixBackdrop />
-        <Providers>{children}</Providers>
+        <Providers>
+          <CMatrixBackdrop />
+          {children}
+        </Providers>
       </body>
     </html>
   );

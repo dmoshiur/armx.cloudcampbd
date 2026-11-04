@@ -100,6 +100,22 @@ class MockAdapter:
                 return f"Message sent to {data.get('contact_name', 'the contact')}."
             return payload.get("message") or f"{name} finished."
 
+    async def stream(
+        self,
+        messages: list[LLMMessage],
+        tool_schemas: list[dict[str, Any]],
+        on_delta,
+    ) -> LLMResponse:
+        """Offline planner has no live token stream; deliver its real reply in
+        chunks and explicitly report ``streamed=False``. Never claim a provider
+        stream that did not happen."""
+        response = await self.complete(messages, tool_schemas)
+        text = response.text or ""
+        for index in range(0, len(text), 24):
+            await on_delta(text[index : index + 24])
+        response.streamed = False
+        return response
+
     async def complete(
         self, messages: list[LLMMessage], tool_schemas: list[dict[str, Any]]
     ) -> LLMResponse:

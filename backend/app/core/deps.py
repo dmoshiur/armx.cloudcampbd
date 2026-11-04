@@ -37,10 +37,27 @@ async def get_auth_context(
     creds: HTTPAuthorizationCredentials | None = Depends(bearer),
     db: AsyncSession = Depends(get_db),
 ) -> AuthContext:
-    if creds is None or not creds.credentials:
+    """Accept the legacy bearer token or the HttpOnly access cookie.
+
+    The cookie is the primary browser transport; bearer tokens remain supported
+    for existing API clients, tests and the Google OAuth compatibility path.
+    """
+    from app.core.config import settings
+
+    # An explicit Authorization header is authoritative: an invalid bearer
+    # token must never silently fall back to a valid cookie session.
+    if request.headers.get("authorization"):
+        raw_token = creds.credentials if creds is not None and creds.credentials else ""
+    elif request.headers.get("x-device-id") or request.headers.get("x-device-token"):
+        # Paired-device credentials are a separate auth system. Never let a
+        # device-authenticated request silently inherit a user's browser cookie.
+        raise _unauthorized()
+    else:
+        raw_token = request.cookies.get(settings.ACCESS_COOKIE_NAME, "")
+    if not raw_token:
         raise _unauthorized()
     try:
-        payload = decode_token(creds.credentials, expected_type="access")
+        payload = decode_token(raw_token, expected_type="access")
     except TokenError as exc:
         raise _unauthorized(str(exc)) from exc
 

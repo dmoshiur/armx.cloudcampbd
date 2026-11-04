@@ -12,11 +12,12 @@ import asyncio
 import itertools
 import json
 import logging
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import httpx
 
 from app.core.config import settings
+from app.core.errors import classify_provider_error
 from app.llm.base import (
     FinishReason,
     LLMError,
@@ -99,9 +100,7 @@ class ClaudeAdapter:
         return "\n\n".join(system_parts), out
 
     # -- call -------------------------------------------------------------
-    async def complete(
-        self, messages: list[LLMMessage], tool_schemas: list[dict[str, Any]]
-    ) -> LLMResponse:
+    def _body(self, messages: list[LLMMessage], tool_schemas: list[dict[str, Any]], *, stream: bool = False) -> dict[str, Any]:
         system, msgs = self._split_system(messages)
         body: dict[str, Any] = {
             "model": self.model,
@@ -119,6 +118,118 @@ class ClaudeAdapter:
                 }
                 for t in tool_schemas
             ]
+        if stream:
+            body["stream"] = True
+        return body
+
+    def _headers(self, key: str) -> dict[str, str]:
+        return {
+            "x-api-key": key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+
+    async def stream(
+        self,
+        messages: list[LLMMessage],
+        tool_schemas: list[dict[str, Any]],
+        on_delta: Callable[[str], Awaitable[None]],
+    ) -> LLMResponse:
+        """Stream real Anthropic Messages SSE deltas; accumulate tool_use blocks."""
+        if not self.api_keys:
+            return self._failure("No Anthropic API key configured")
+        key = await self._next_key()
+        body = self._body(messages, tool_schemas, stream=True)
+        text_parts: list[str] = []
+        blocks: dict[int, dict[str, Any]] = {}
+        usage = Usage()
+        stop = "end_turn"
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                async with client.stream(
+                    "POST", f"{self.base_url}/v1/messages", json=body, headers=self._headers(key)
+                ) as resp:
+                    if resp.status_code >= 400:
+                        detail = (await resp.aread())[:300].decode(errors="replace")
+                        return self._failure(f"Anthropic {resp.status_code}: {detail}", status=resp.status_code)
+                    event = ""
+                    async for line in resp.aiter_lines():
+                        if line.startswith("event:"):
+                            event = line[6:].strip()
+                            continue
+                        if not line.startswith("data:"):
+                            continue
+                        try:
+                            payload = json.loads(line[5:].strip())
+                        except json.JSONDecodeError:
+                            continue
+                        kind = payload.get("type") or event
+                        if kind == "message_start":
+                            raw = (payload.get("message") or {}).get("usage") or {}
+                            usage = Usage(int(raw.get("input_tokens") or 0), int(raw.get("output_tokens") or 0))
+                        elif kind == "content_block_start":
+                            index = int(payload.get("index") or 0)
+                            block = payload.get("content_block") or {}
+                            blocks[index] = {
+                                "type": block.get("type", "text"),
+                                "id": block.get("id", ""),
+                                "name": block.get("name", ""),
+                                "text": block.get("text", ""),
+                                "input": "",
+                            }
+                        elif kind == "content_block_delta":
+                            index = int(payload.get("index") or 0)
+                            delta = payload.get("delta") or {}
+                            block = blocks.setdefault(index, {"type": "text", "id": "", "name": "", "text": "", "input": ""})
+                            if delta.get("type") == "text_delta":
+                                piece = delta.get("text") or ""
+                                block["text"] += piece
+                                if piece:
+                                    text_parts.append(piece)
+                                    await on_delta(piece)
+                            elif delta.get("type") == "input_json_delta":
+                                block["input"] += delta.get("partial_json") or ""
+                        elif kind == "message_delta":
+                            stop = payload.get("delta", {}).get("stop_reason") or stop
+                            raw = payload.get("usage") or {}
+                            usage = Usage(usage.input_tokens, int(raw.get("output_tokens") or usage.output_tokens))
+        except httpx.HTTPError as exc:
+            return self._failure(str(exc))
+        tool_calls = [
+            ToolCall(id=block["id"] or f"toolu_{i}", name=block["name"], arguments=parse_tool_input(block["input"]))
+            for i, block in sorted(blocks.items())
+            if block["type"] == "tool_use" and block["name"]
+        ]
+        reason = {
+            "tool_use": FinishReason.TOOL_USE,
+            "max_tokens": FinishReason.LENGTH,
+            "refusal": FinishReason.REFUSAL,
+        }.get(stop, FinishReason.STOP)
+        if tool_calls:
+            reason = FinishReason.TOOL_USE
+        return LLMResponse(
+            text="".join(text_parts).strip(),
+            tool_calls=tool_calls,
+            finish_reason=reason,
+            model=self.model,
+            usage=usage,
+            raw_stop_reason=stop,
+            streamed=True,
+        )
+
+    def _failure(self, raw: str, *, status: int = 0) -> LLMResponse:
+        classified = classify_provider_error(raw, status=status, provider=self.name)
+        return LLMResponse(
+            finish_reason=FinishReason.ERROR,
+            error=raw[:500],
+            error_code=classified.code,
+            model=self.model,
+        )
+
+    async def complete(
+        self, messages: list[LLMMessage], tool_schemas: list[dict[str, Any]]
+    ) -> LLMResponse:
+        body = self._body(messages, tool_schemas)
 
         attempts = max(1, min(len(self.api_keys), 2))
         last: LLMError | None = None
@@ -133,16 +244,10 @@ class ClaudeAdapter:
                 log.warning("Claude attempt %s failed (%s); rotating key", attempt + 1, exc.message)
                 await asyncio.sleep(0.4 * (attempt + 1))
         assert last is not None
-        return LLMResponse(
-            finish_reason=FinishReason.ERROR, error=last.message, model=self.model
-        )
+        return self._failure(last.message, status=last.status)
 
     async def _post(self, body: dict[str, Any], key: str) -> LLMResponse:
-        headers = {
-            "x-api-key": key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        }
+        headers = self._headers(key)
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             resp = await client.post(f"{self.base_url}/v1/messages", json=body, headers=headers)
 
