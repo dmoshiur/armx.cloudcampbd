@@ -233,10 +233,16 @@ and WS all reported that honestly instead of claiming the binary ran.
   `401` and `/api` proxy responses were verified.
 - Frontend bundle: no secret values; only non-secret variable names appear in
   explanatory UI copy.
-- `nginx -t`, `docker build`, a real CMatrix PTY, live Resend email/webhook,
-  Flutter/Android builds, browser console/network/overflow and a visual
-  comparison against the Postimages login reference remain unverified because
-  the binaries, credentials, browser tooling and reference image were not
-  available. The Postimages HTML was reachable but its image endpoints failed.
-  These items are explicitly recorded in `docs/ENGINEERING_CHECKLIST.md` and are
-  not marked complete.
+- GitHub Actions PR #5: `Validate containers` passed. The `tests` job passed
+  backend/container-entrypoint tests, frontend dependency/type checks and
+  Flutter Android analyze/compile; the `root-image` job built the root
+  Dockerfile, started the full stack on a non-default runtime port and verified
+  migrations, web, API and signup through nginx. This closes the earlier local
+  gaps for Docker image build, Flutter compilation and the public-port proxy.
+- `nginx -t` itself, live Resend email/webhook, real CMatrix PTY frame output,
+  browser console/network/overflow and a visual comparison against the
+  Postimages login reference remain unverified because the local binary,
+  credentials, browser tooling and reference image were not available. The
+  Postimages HTML was reachable but its image endpoints failed. These items are
+  explicitly recorded in `docs/ENGINEERING_CHECKLIST.md` and are not marked
+  complete.

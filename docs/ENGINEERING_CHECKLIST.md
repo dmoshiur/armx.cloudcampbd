@@ -27,8 +27,9 @@ Nothing in this checklist treats API acceptance as email delivery, a simulated d
 | Admin authorization | `GET /api/admin/email-deliveries` with no bearer, user bearer and admin bearer | **PASS** — `401`, `403`, `200` in tests; live no-auth probe returned `401` |
 | Frontend secret bundle scan | precise regex over `web/.next/static` and `web/.next/server` | **PASS** — `NO_FRONTEND_SECRET_VALUES`; variable names in UI copy are not secret values |
 | Tracked-source credential scan | `git grep` for provider key patterns and non-empty secret assignments | **PASS** — only `GROQ_API_KEY="YOUR_GROQ_KEY"` placeholder in README |
-| nginx config static validation | brace balance, required directives and WS upgrade forwarding in both configs | **PASS (static)** — `nginx` binary is unavailable, so `nginx -t` could not be run |
-| Dockerfile static validation | `cmatrix`, `ncurses-term` and GPL notice copy present | **PASS (static)** — `docker` binary is unavailable, so an image build could not be run |
+| GitHub Actions PR #5 | `Validate containers`: `tests` + `root-image` | **PASS** — `tests` passed in `6m6s`; `root-image` passed in `1m0s`. Backend tests, container entrypoint tests, frontend dependency/type check, Flutter Android analyze/compile, Dockerfile build, migrations/web/API/signup through the public nginx port all passed |
+| nginx config / public-port proxy | static brace/directive/WS checks plus full-stack smoke test | **PASS** — both configs are statically valid; the CI `root-image` job started the full stack on a non-default runtime port and verified migrations, web, API and signup through nginx. `nginx -t` itself was not run locally because the binary is absent |
+| Dockerfile / real CMatrix package installation | `cmatrix`, `ncurses-term` and GPL notice copy present; CI image build | **PASS** — GitHub Actions built the repository-root Dockerfile and smoke-tested the full stack. Local `docker` binary is unavailable, but the image build is no longer unverified |
 | Reference image | `https://i.postimg.cc/Kk4TjwHS/image.png` | **UNVERIFIED** — Postimages HTML was reachable but the displayed/download image endpoints failed (`OpenSSL SSL_connect` / HTTP 500); design was recreated from the written direction only |
 | Browser console, network trace, pixel overflow | browser automation | **UNVERIFIED** — no browser tool, viewport screenshot or console trace is available in this workspace |
 
@@ -48,11 +49,11 @@ Nothing in this checklist treats API acceptance as email delivery, a simulated d
 | Automations, activity, usage analytics, provider health | **PASS** | `/automations`, `/activity`, `/analytics/usage`, `/health/providers` pages/endpoints; build passes |
 | Original CMatrix PTY, WS→SSE, one-use tickets, honest MIT fallback | **PASS (transport)** / **CONFIG (binary)** | Dockerfile installs `cmatrix`; local sandbox has no binary, so status/SSE/WS correctly reported unavailable. Docker build is still required to verify the real PTY in production |
 | GPL-3.0 notice and vendored MIT fallback licence | **PASS** | `third_party/cmatrix/NOTICE.md`, `web/lib/vendor/{LICENSE,cmatrix.mjs,cmatrix.d.mts}`; npm `cmatrix` dependency removed and lockfile regenerated |
-| nginx WebSocket upgrade forwarding | **PASS (static)** | both nginx configs contain `/api/matrix/ws` upgrade headers; `nginx -t` unavailable |
+| nginx WebSocket upgrade forwarding | **PASS (static + CI proxy)** | both nginx configs contain `/api/matrix/ws` upgrade headers; CI full-stack public-port smoke test passed. `nginx -t` was not run locally |
 | 12 navigation destinations and keyboard-aware shell | **PASS** | all 16 listed app/auth routes returned `200` live; `/conversations`, `/projects`, `/capabilities`, `/tools`, `/automations`, `/memory`, `/activity` are now real pages |
 | Compact/fixed composer, safe Markdown, attachments, read-aloud, search | **PASS** | assistant page and components; production build passes |
 | Reduced motion, hidden-tab pausing and bounded Matrix renderer | **PASS (implementation)** / **UNVERIFIED (visual)** | controls/status exist; no browser viewport/console trace here |
-| Complete Flutter/Android build | **UNVERIFIED** | native sources inventoried; no Flutter/Android SDK runner in this workspace |
+| Flutter Android client | **PASS (CI compile)** | GitHub Actions `Analyze and compile Flutter Android client` passed; no physical-device runtime test was performed |
 | Full `docs/AUDIT.md` review update | **PASS** | baseline audit retained; post-implementation section added |
 | `docs/ENGINEERING_CHECKLIST.md` | **PASS** | this file |
 
@@ -90,8 +91,8 @@ Nothing in this checklist treats API acceptance as email delivery, a simulated d
 2. **Render/environment**: fill every `sync: false` value in `render.yaml`: `APP_BASE_URL`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `RESEND_WEBHOOK_SECRET`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `LLM_SECRETS_KEY`, `GROQ_API_KEY`, and one first-admin bootstrap. Keep all secrets server-side; production startup refuses missing/placeholder Resend values, non-HTTPS origins and insecure DB settings.
 3. **Email policy**: `REQUIRE_EMAIL_VERIFICATION=false` preserves the existing permissive policy. Set it to `true` only after confirming the verified domain/webhook and that all existing users have verified addresses.
 4. **Deployment integrations**: `PIPELINE_MODE=live` is set for production; add `GITHUB_TOKEN`, `VERCEL_TOKEN` and `GITHUB_ALLOWED_TARGETS` (or default org) only when real deployment is intended. Without them, the UI honestly reports `not_configured`.
-5. **CMatrix**: build/run the provided Docker image (or install Debian `cmatrix` and `ncurses-term`) to exercise the real GPL-3.0 PTY. The local sandbox had no binary, so only the honest unavailable path and MIT fallback were tested.
-6. **Infrastructure validation still unavailable here**: `nginx -t`, `docker build`, browser console/network/visual overflow, Flutter/Android builds, live Resend email/webhook, and a real provider-confirmed deployment. These are **not** marked complete.
+5. **CMatrix**: the CI image build and full-stack smoke test passed, but no real PTY frame stream was exercised because the local sandbox has no `cmatrix` binary. Run the built image with the executable installed to verify authentic frames; the honest unavailable path and MIT fallback are already tested.
+6. **Still unverified**: the `nginx -t` command itself (the full nginx public-port smoke test passed in CI), browser console/network/visual overflow, live Resend email/webhook, real CMatrix frame output and a real provider-confirmed deployment. These are **not** marked complete.
 7. **Reference login art**: the Postimages image could not be downloaded; compare the compact auth pages against the original design in a browser and adjust spacing/type if a pixel-level match is required.
 
 ## 5. Commands used for final verification
@@ -110,3 +111,10 @@ cd backend && ENV=test DATABASE_URL=sqlite+aiosqlite:////tmp/armx-mig-auth.db \
 Live local preview checks used `uvicorn app.main:app --host 0.0.0.0 --port 8000` and
 `next start -H 0.0.0.0 -p 3000`; browser-facing `/api` requests went through the
 Next rewrite, not `localhost` from client code.
+
+GitHub Actions PR #5 additionally ran `Validate containers`: the `tests` job
+passed backend tests, container entrypoint tests, frontend dependency/type
+checks and Flutter Android analyze/compile; the `root-image` job built the root
+Dockerfile, started the full stack through a non-default runtime port and
+verified migrations, web, API and signup through nginx. The only annotations
+were non-fatal Node.js 20 deprecation and Ubuntu image-migration notices.
